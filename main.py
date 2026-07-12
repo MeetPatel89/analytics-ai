@@ -7,10 +7,16 @@ dotenv.load_dotenv()
 
 from messages import ChatMessage
 from providers.openai_provider import OpenAIProvider
-from tools import TOOL_FUNCTIONS, TOOLS
+from tools import DataframeCatalog, load_dataset_specs, configure_tools
+
 
 MAX_TURNS = 10
 
+DATA_PATH = "data/"
+
+specs = load_dataset_specs(DATA_PATH)
+catalog = DataframeCatalog.from_specs(specs)
+tool_registry, tool_schemas = configure_tools(catalog)
 
 def get_output_text(response) -> str | None:
     for item in response.output:
@@ -40,7 +46,7 @@ def run_tool_loop(provider: OpenAIProvider) -> None:
             return
 
         for call in function_calls:
-            tool = TOOL_FUNCTIONS.get(call.name)
+            tool = tool_registry.get(call.name)
             if tool is None:
                 output = f"Unknown tool: {call.name}"
             else:
@@ -51,15 +57,27 @@ def run_tool_loop(provider: OpenAIProvider) -> None:
 
 
 if __name__ == "__main__":
+    system_prompt = """
+    You are a smart data assistant capable of reading multiple CSV files.
+- You have access to 4 different datasets: SaaS Docs, Credit Card Terms, Hospital Policy, and Ecommerce FAQs.
+- When asked a question, determine which DataFrame is most relevant.
+- Do NOT answer from general knowledge.
+- Answer in plain English.
+    """
+    messages = [
+        ChatMessage(
+            role="system",
+            content=system_prompt,
+        ),
+        ChatMessage(
+            role="user",
+            content="What is the visiting hour in the hospital?",
+        ),
+    ]
     provider = OpenAIProvider(
         api_key=os.getenv("OPENAI_API_KEY"),
         model="gpt-4o-mini",
-        tools=TOOLS,
-        messages=[
-            ChatMessage(
-                role="user",
-                content="What is my horoscope? I am an Aquarius.",
-            ),
-        ],
+        tools=tool_schemas,
+        messages=messages,
     )
     run_tool_loop(provider)
