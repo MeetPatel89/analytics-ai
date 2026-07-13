@@ -9,3 +9,33 @@ dependencies = [
     "pandas>=3.0.3",
     "python-dotenv>=1.2.2",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+preview = true
+select = [
+    "E",
+    "F",
+    "I",
+    "PTH",
+    "N",
+    "D",
+    "C4",
+    "ANN"
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

@@ -155,7 +155,9 @@ class OpenAIProvider(BaseProvider):
         return function_calls
 
     def add_tool_output(self, call_id: str, output: str) -> None:
-        self.add_items(FunctionCallOutputHistory(call_id=call_id, output=output).to_provider_item())
+        self.add_items(
+            FunctionCallOutputHistory(call_id=call_id, output=output).to_provider_item()
+        )
 
     def generate(self):
         return self.client.responses.create(
