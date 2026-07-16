@@ -14,6 +14,19 @@ from analytics_agent.messages import (
 from analytics_agent.providers.base import BaseProvider
 
 
+def list_available_models(api_key: str) -> list[str]:
+    """Return the OpenAI model IDs available to the supplied API key."""
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is required to list available models.")
+
+    try:
+        models = OpenAI(api_key=api_key).models.list()
+    except Exception as exc:
+        raise RuntimeError(f"Unable to list OpenAI models: {exc}") from exc
+
+    return sorted({model.id for model in models.data})
+
+
 class OpenAIProvider(BaseProvider):
     """OpenAI Provider."""
 

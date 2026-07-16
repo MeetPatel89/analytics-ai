@@ -7,11 +7,11 @@ import dotenv
 
 from analytics_agent.messages import generate_initial_messages
 from analytics_agent.providers.openai_provider import OpenAIProvider
-from analytics_agent.tool_loop import run_tool_loop
 from analytics_agent.tools import (
     DataframeCatalog,
     create_dataframe_tools,
     load_dataset_specs,
+    run_tool_loop,
 )
 
 dotenv.load_dotenv()

@@ -39,3 +39,13 @@ uv run run_incident_agent
 `run_dataframe_agent` answers questions from the bundled CSV datasets using
 dataframe tools. `run_incident_agent` investigates a sample server incident using
 health, log, restart, and escalation tools.
+
+For an interactive configuration flow, run:
+
+```sh
+uv run run_interactive_agent
+```
+
+It lets you select an account-available OpenAI model, one or both tool chains,
+prompts, and output detail before confirming the run. Select `View configuration`
+to inspect built-in tool chains and account-available models without running one.

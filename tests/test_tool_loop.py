@@ -62,12 +62,16 @@ class ToolLoopTests(unittest.TestCase):
         )
         registry, _ = create_incident_response_tools()
 
-        with contextlib.redirect_stdout(io.StringIO()):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
             run_tool_loop(provider, registry, max_turns=2)  # type: ignore[arg-type]
 
         self.assertEqual(provider.turn, 2)
         self.assertEqual(provider.tool_outputs[0][0], "call_health")
         self.assertIn('"cpu": "98%"', provider.tool_outputs[0][1])
+        self.assertIn("Calling tool: get_server_health", output.getvalue())
+        self.assertIn("Tool result:", output.getvalue())
+        self.assertIn("Final answer: None", output.getvalue())
 
     def test_dataframe_tool_call_is_executed_and_returned(self) -> None:
         """The shared loop should also route dataframe calls through their registry."""
@@ -89,6 +93,23 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(provider.turn, 2)
         self.assertEqual(provider.tool_outputs[0][0], "call_list_dataframes")
         self.assertIn("Records: 2 rows x 1 columns", provider.tool_outputs[0][1])
+
+    def test_verbose_output_includes_provider_diagnostics(self) -> None:
+        """Verbose runs should retain the raw provider diagnostics."""
+        provider = FakeProvider(
+            function_call_message(
+                call_id="call_health",
+                name="get_server_health",
+                arguments_raw='{"server_id":"payment-server-01"}',
+            )
+        )
+        registry, _ = create_incident_response_tools()
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            run_tool_loop(provider, registry, max_turns=2, verbose=True)  # type: ignore[arg-type]
+
+        self.assertIn('"turn": 1', output.getvalue())
 
 
 if __name__ == "__main__":
