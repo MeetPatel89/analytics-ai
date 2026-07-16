@@ -1,16 +1,16 @@
 """Composition root for incident-response tools."""
 
-from analytics_agent.tools.incident_response.incident_response_tools import (
-    escalate_incident,
-    fetch_recent_logs,
-    get_server_health,
-    restart_service,
-)
-from analytics_agent.tools.incident_response.incident_response_tools_models import (
+from analytics_agent.tools.incident_response.models import (
     EscalateIncidentInput,
     FetchRecentLogsInput,
     GetServerHealthInput,
     RestartServiceInput,
+)
+from analytics_agent.tools.incident_response.tools import (
+    escalate_incident,
+    fetch_recent_logs,
+    get_server_health,
+    restart_service,
 )
 from analytics_agent.tools.provider_factories import (
     OpenAIToolSchema,

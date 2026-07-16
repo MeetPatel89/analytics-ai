@@ -5,22 +5,25 @@ import io
 import unittest
 from types import SimpleNamespace
 
+import pandas as pd
+
 from analytics_agent.messages import FunctionCallMessage, function_call_message
-from analytics_agent.tool_loop import run_tool_loop
-from analytics_agent.tools import create_incident_response_tools
+from analytics_agent.tools import (
+    DataframeCatalog,
+    DatasetSpec,
+    create_dataframe_tools,
+    create_incident_response_tools,
+    run_tool_loop,
+)
 
 
 class FakeProvider:
     """Deterministic provider that requests one tool and then finishes."""
 
-    def __init__(self) -> None:
+    def __init__(self, call: FunctionCallMessage) -> None:
         self.turn = 0
         self.tool_outputs: list[tuple[str, str]] = []
-        self.call = function_call_message(
-            call_id="call_health",
-            name="get_server_health",
-            arguments_raw='{"server_id":"payment-server-01"}',
-        )
+        self.call = call
 
     def generate(self) -> SimpleNamespace:
         """Return a minimal response object for the current turn."""
@@ -50,7 +53,13 @@ class ToolLoopTests(unittest.TestCase):
 
     def test_incident_tool_call_is_executed_and_returned(self) -> None:
         """The shared loop should route incident calls through their registry."""
-        provider = FakeProvider()
+        provider = FakeProvider(
+            function_call_message(
+                call_id="call_health",
+                name="get_server_health",
+                arguments_raw='{"server_id":"payment-server-01"}',
+            )
+        )
         registry, _ = create_incident_response_tools()
 
         with contextlib.redirect_stdout(io.StringIO()):
@@ -59,6 +68,27 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(provider.turn, 2)
         self.assertEqual(provider.tool_outputs[0][0], "call_health")
         self.assertIn('"cpu": "98%"', provider.tool_outputs[0][1])
+
+    def test_dataframe_tool_call_is_executed_and_returned(self) -> None:
+        """The shared loop should also route dataframe calls through their registry."""
+        catalog = DataframeCatalog.from_specs(
+            [DatasetSpec("Records", pd.DataFrame({"record_id": [1, 2]}))]
+        )
+        registry, _ = create_dataframe_tools(catalog)
+        provider = FakeProvider(
+            function_call_message(
+                call_id="call_list_dataframes",
+                name="list_dataframes",
+                arguments_raw="{}",
+            )
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_tool_loop(provider, registry, max_turns=2)  # type: ignore[arg-type]
+
+        self.assertEqual(provider.turn, 2)
+        self.assertEqual(provider.tool_outputs[0][0], "call_list_dataframes")
+        self.assertIn("Records: 2 rows x 1 columns", provider.tool_outputs[0][1])
 
 
 if __name__ == "__main__":

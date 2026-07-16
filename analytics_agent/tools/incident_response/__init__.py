@@ -1,6 +1,6 @@
 """Incident-response tools."""
 
-from analytics_agent.tools.incident_response.incident_response_registry import (
+from analytics_agent.tools.incident_response.registry import (
     create_incident_response_tools,
 )
 

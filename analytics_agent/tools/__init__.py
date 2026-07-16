@@ -13,6 +13,7 @@ from analytics_agent.tools.incident_response import (
 )
 from analytics_agent.tools.provider_factories import create_openai_tools
 from analytics_agent.tools.registry import ToolDefinition, ToolInput, ToolRegistry
+from analytics_agent.tools.tool_loop import run_tool_loop
 
 __all__ = [
     "DataframeCatalog",
@@ -26,4 +27,5 @@ __all__ = [
     "create_incident_response_tools",
     "create_openai_tools",
     "load_dataset_specs",
+    "run_tool_loop",
 ]

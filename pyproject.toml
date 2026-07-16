@@ -25,7 +25,7 @@ module-name = "analytics_agent"
 module-root = ""
 
 [project.scripts]
-run_agent = "analytics_agent.main:main"
+run_dataframe_agent = "analytics_agent.dataframe_main:main"
 run_incident_agent = "analytics_agent.incident_response_main:main"
 
 [tool.ruff]

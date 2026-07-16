@@ -1,4 +1,4 @@
-"""Entry point for verifying the incident-response tool loop."""
+"""Entry point for verifying the l1 server incident-response tool loop."""
 
 import os
 
@@ -6,14 +6,14 @@ import dotenv
 
 from analytics_agent.messages import generate_initial_messages
 from analytics_agent.providers.openai_provider import OpenAIProvider
-from analytics_agent.tool_loop import run_tool_loop
-from analytics_agent.tools import create_incident_response_tools
+from analytics_agent.tools import create_incident_response_tools, run_tool_loop
 
 
 def main() -> None:
     """Investigate a sample incident through the OpenAI tool-calling loop."""
     dotenv.load_dotenv()
     tool_registry, tool_schemas = create_incident_response_tools()
+
     messages = generate_initial_messages(
         """You are an incident-response agent.
 Use the available tools to inspect the reported server before taking action.
