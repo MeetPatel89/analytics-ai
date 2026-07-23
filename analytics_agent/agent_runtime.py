@@ -17,14 +17,12 @@ from analytics_agent.providers.openai_provider import (
 )
 from analytics_agent.tools import ToolChain
 
-ProviderName = Provider
-
 
 @dataclass(frozen=True)
 class AgentRunConfig:
     """Validated configuration selected before an agent run starts."""
 
-    provider: ProviderName
+    provider: Provider
     model: str
     tool_chains: tuple[ToolChain, ...]
     system_prompt: str
@@ -54,7 +52,7 @@ ProviderFactory = Callable[
 class ProviderDefinition:
     """Describe one provider available to the interactive runtime."""
 
-    name: ProviderName
+    name: Provider
     label: str
     credential_env_var: str
     list_models: ModelLister

@@ -86,6 +86,9 @@ class InteractiveCLI:
             return
 
         tool_chains = self._select_tool_chains()
+        print("--------------------------------")
+        print(tool_chains)
+        print("--------------------------------")
         system_prompt = self._select_system_prompt(tool_chains)
         user_prompt = Prompt.ask(
             "Task for the agent",

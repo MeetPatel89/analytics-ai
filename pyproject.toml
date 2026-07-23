@@ -26,9 +26,9 @@ module-name = "analytics_agent"
 module-root = ""
 
 [project.scripts]
-run_dataframe_agent = "analytics_agent.dataframe_main:main"
-run_incident_agent = "analytics_agent.incident_response_main:main"
-run_interactive_agent = "analytics_agent.interactive_cli:main"
+dataframe_agent = "analytics_agent.dataframe_main:main"
+incident_agent = "analytics_agent.incident_response_main:main"
+agent = "analytics_agent.interactive_cli:main"
 
 [tool.ruff]
 line-length = 88

@@ -25,6 +25,7 @@ class ToolChain(StrEnum):
 
     DATAFRAME = "dataframe"
     INCIDENT_RESPONSE = "incident_response"
+    SQL_ANALYZER = "sql_analyzer"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,12 @@ _TOOL_CHAIN_INFO = {
             "restart_service",
             "escalate_incident",
         ),
+    ),
+    ToolChain.SQL_ANALYZER: ToolChainInfo(
+        chain=ToolChain.SQL_ANALYZER,
+        label="SQL analyzer",
+        description="Analyze SQL queries and provide insights.",
+        tool_names=("analyze_sql",),
     ),
 }
 
@@ -106,6 +113,14 @@ def default_system_prompt(chains: tuple[ToolChain, ...]) -> str:
             "You are an incident-response agent. Inspect server health and logs "
             "before taking action, restart only when evidence supports it, and "
             "escalate unresolved dependency failures. Summarize evidence and actions."
+        )
+    if ToolChain.SQL_ANALYZER in selected:
+        prompts.append(
+            "Generate an SQL query based on a prompt. Do not reply with anything "
+            "besides the SQL query.\n"
+            "The prompt is: {prompt}.\n"
+            "The available columns are: {columns}.\n"
+            "The table name is: {table_name}.\n"
         )
     if len(selected) > 1:
         prompts.append("Use only the tool chain relevant to the user's request.")
