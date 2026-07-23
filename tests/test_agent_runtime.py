@@ -1,5 +1,6 @@
 """Tests for interactive agent runtime composition."""
 
+import importlib
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -39,6 +40,17 @@ class AgentRunConfigTests(unittest.TestCase):
 
 class ToolChainCompositionTests(unittest.TestCase):
     """Verify selected chains produce one combined executable tool set."""
+
+    def test_importing_dataframe_entry_point_has_no_runtime_side_effects(self) -> None:
+        """Importing an entry point should not read datasets or credentials."""
+        with patch(
+            "analytics_agent.tools.tool_chains.load_dataset_specs"
+        ) as load_dataset_specs:
+            from analytics_agent import dataframe_main
+
+            importlib.reload(dataframe_main)
+
+        load_dataset_specs.assert_not_called()
 
     def test_combined_chains_include_all_tools_and_schemas(self) -> None:
         """Both chains should preserve order and have matching OpenAI schemas."""

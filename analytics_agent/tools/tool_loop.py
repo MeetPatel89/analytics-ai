@@ -2,21 +2,23 @@
 
 import json
 
-from openai.types.responses import Response
-
 from analytics_agent.messages import (
     FunctionCallMessage,
     from_openai_output_item,
     get_message_text,
 )
-from analytics_agent.providers.openai_provider import OpenAIProvider
+from analytics_agent.providers.base import (
+    ProviderResponseT,
+    ToolLoopProvider,
+    ToolLoopResponse,
+)
 from analytics_agent.tools.registry import ToolRegistry
 
 DEFAULT_MAX_TURNS = 10
 
 
 def run_tool_loop(
-    provider: OpenAIProvider,
+    provider: ToolLoopProvider[ProviderResponseT],
     tool_registry: ToolRegistry,
     max_turns: int = DEFAULT_MAX_TURNS,
     *,
@@ -41,19 +43,24 @@ def run_tool_loop(
             return
 
         for call in function_calls:
-            arguments = _tool_arguments(call)
-            print(f"Calling tool: {call.name}({json.dumps(arguments)})")
-            output = tool_registry.execute(call.name, arguments)
+            try:
+                arguments = _tool_arguments(call)
+            except ToolArgumentsError as exc:
+                print(f"Calling tool: {call.name}(<invalid arguments>)")
+                output = str(exc)
+            else:
+                print(f"Calling tool: {call.name}({json.dumps(arguments)})")
+                output = tool_registry.execute(call.name, arguments)
             print(f"Tool result: {output}")
             provider.add_tool_output(call.call_id, output)
 
     print("Max turns reached without a final response.")
 
 
-def get_output_text(response: Response) -> str | None:
+def get_output_text(response: ToolLoopResponse) -> str | None:
     """Extract the first text message from a model response."""
     for item in response.output:
-        if item.type != "message":
+        if getattr(item, "type", None) != "message":
             continue
         message = from_openai_output_item(item)
         if message is not None:
@@ -64,4 +71,19 @@ def get_output_text(response: Response) -> str | None:
 def _tool_arguments(call: FunctionCallMessage) -> dict[str, object]:
     if call.arguments_parsed is not None:
         return call.arguments_parsed
-    return json.loads(call.arguments_raw)
+    try:
+        arguments = json.loads(call.arguments_raw)
+    except json.JSONDecodeError as exc:
+        raise ToolArgumentsError(
+            f"Invalid arguments for tool '{call.name}': arguments must be valid JSON."
+        ) from exc
+    if not isinstance(arguments, dict):
+        raise ToolArgumentsError(
+            f"Invalid arguments for tool '{call.name}': "
+            "arguments must be a JSON object."
+        )
+    return arguments
+
+
+class ToolArgumentsError(ValueError):
+    """Raised when a provider returns an unusable tool argument payload."""

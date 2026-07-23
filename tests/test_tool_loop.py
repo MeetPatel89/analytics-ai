@@ -64,7 +64,7 @@ class ToolLoopTests(unittest.TestCase):
 
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            run_tool_loop(provider, registry, max_turns=2)  # type: ignore[arg-type]
+            run_tool_loop(provider, registry, max_turns=2)
 
         self.assertEqual(provider.turn, 2)
         self.assertEqual(provider.tool_outputs[0][0], "call_health")
@@ -88,7 +88,7 @@ class ToolLoopTests(unittest.TestCase):
         )
 
         with contextlib.redirect_stdout(io.StringIO()):
-            run_tool_loop(provider, registry, max_turns=2)  # type: ignore[arg-type]
+            run_tool_loop(provider, registry, max_turns=2)
 
         self.assertEqual(provider.turn, 2)
         self.assertEqual(provider.tool_outputs[0][0], "call_list_dataframes")
@@ -107,9 +107,27 @@ class ToolLoopTests(unittest.TestCase):
         output = io.StringIO()
 
         with contextlib.redirect_stdout(output):
-            run_tool_loop(provider, registry, max_turns=2, verbose=True)  # type: ignore[arg-type]
+            run_tool_loop(provider, registry, max_turns=2, verbose=True)
 
         self.assertIn('"turn": 1', output.getvalue())
+
+    def test_invalid_tool_arguments_are_returned_to_the_provider(self) -> None:
+        """Malformed provider arguments should not terminate the agent loop."""
+        provider = FakeProvider(
+            function_call_message(
+                call_id="call_health",
+                name="get_server_health",
+                arguments_raw="{invalid-json",
+            )
+        )
+        registry, _ = create_incident_response_tools()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_tool_loop(provider, registry, max_turns=2)
+
+        self.assertEqual(provider.turn, 2)
+        self.assertEqual(provider.tool_outputs[0][0], "call_health")
+        self.assertIn("arguments must be valid JSON", provider.tool_outputs[0][1])
 
 
 if __name__ == "__main__":

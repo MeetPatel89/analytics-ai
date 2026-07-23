@@ -15,7 +15,9 @@ class FetchRecentLogsInput(ToolInput):
     """Arguments for fetching recent logs."""
 
     server_id: str = Field(description="The ID of the server to fetch logs for.")
-    lines: int = Field(default=5, ge=1, le=100)
+    lines: int = Field(
+        default=5, ge=1, le=100, description="The number of lines of logs to fetch."
+    )
 
 
 class RestartServiceInput(ToolInput):

@@ -106,10 +106,12 @@ def _assistant_part_to_openai(part: ContentPart) -> dict[str, Any]:
             "text": part.text,
             "annotations": list(part.annotations),
         }
-    return {
-        "type": "refusal",
-        "refusal": part.refusal,
-    }
+    if isinstance(part, RefusalPart):
+        return {
+            "type": "refusal",
+            "refusal": part.refusal,
+        }
+    raise ValueError(f"Unsupported content part: {type(part)!r}")
 
 
 def _part_from_openai(part: object) -> ContentPart:

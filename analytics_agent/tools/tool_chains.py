@@ -41,7 +41,7 @@ _TOOL_CHAIN_INFO = {
     ToolChain.DATAFRAME: ToolChainInfo(
         chain=ToolChain.DATAFRAME,
         label="Dataframe analysis",
-        description="Query the bundled CSV datasets.",
+        description="Query locally configured CSV datasets.",
         tool_names=(
             "list_dataframes",
             "describe_dataframe",
@@ -97,7 +97,7 @@ def default_system_prompt(chains: tuple[ToolChain, ...]) -> str:
     prompts: list[str] = []
     if ToolChain.DATAFRAME in selected:
         prompts.append(
-            "You are a data assistant with access to bundled CSV datasets. "
+            "You are a data assistant with access to configured CSV datasets. "
             "Use dataframe tools for factual answers, do not answer from general "
             "knowledge, and respond in plain English."
         )

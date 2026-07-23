@@ -42,15 +42,11 @@ class OpenAIProvider(BaseProvider):
             raise ValueError("API key is required")
         if not model:
             raise ValueError("Model is required")
-        self.client = OpenAI(api_key=api_key)
-        self.model = model
-        self.tools = tools
+        self._client = OpenAI(api_key=api_key)
+        self._model = model
+        self._tools = list(tools) if tools is not None else None
         for message in messages or []:
             self.add_message(message)
-
-    def add_message(self, message: ChatMessage) -> None:
-        """Append a canonical message to history."""
-        self.add_items(message)
 
     def add_response_output(
         self, response: Response | SimpleNamespace
@@ -72,8 +68,8 @@ class OpenAIProvider(BaseProvider):
 
     def generate(self) -> Response:
         """Send the current conversation history to OpenAI."""
-        return self.client.responses.create(
-            model=self.model,
-            tools=self.tools,
+        return self._client.responses.create(
+            model=self._model,
+            tools=self._tools,
             input=self.serialized_history("openai"),
         )

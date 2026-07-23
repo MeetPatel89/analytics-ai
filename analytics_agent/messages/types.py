@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 Provider = Literal["openai"]
@@ -51,7 +51,7 @@ class BaseMessage:
 class SystemMessage(BaseMessage):
     """System instruction message."""
 
-    content: tuple[TextPart, ...] = field(default_factory=tuple)
+    content: tuple[TextPart, ...] = ()
     role: Literal["system"] = "system"
 
 
@@ -59,7 +59,7 @@ class SystemMessage(BaseMessage):
 class UserMessage(BaseMessage):
     """User input message."""
 
-    content: tuple[TextPart, ...] = field(default_factory=tuple)
+    content: tuple[TextPart, ...] = ()
     role: Literal["user"] = "user"
 
 
@@ -67,7 +67,7 @@ class UserMessage(BaseMessage):
 class AssistantMessage(BaseMessage):
     """Assistant output message."""
 
-    content: tuple[ContentPart, ...] = field(default_factory=tuple)
+    content: tuple[ContentPart, ...] = ()
     id: str | None = None
     status: AssistantStatus | None = None
     phase: AssistantPhase | None = None
