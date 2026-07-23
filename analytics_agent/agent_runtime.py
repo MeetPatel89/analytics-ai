@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
 
 from analytics_agent.messages import generate_initial_messages
+from analytics_agent.providers.base import (
+    Provider,
+    ToolLoopProvider,
+    ToolLoopResponse,
+)
 from analytics_agent.providers.openai_provider import OpenAIProvider
+from analytics_agent.providers.openai_provider import (
+    list_available_models as list_openai_models,
+)
 from analytics_agent.tools import ToolChain
 
-ProviderName = Literal["openai"]
+ProviderName = Provider
 
 
 @dataclass(frozen=True)
@@ -35,6 +43,24 @@ class AgentRunConfig:
             raise ValueError("A user task is required.")
 
 
+ModelLister = Callable[[str], list[str]]
+ProviderFactory = Callable[
+    [AgentRunConfig, str, list[dict[str, object]]],
+    ToolLoopProvider[ToolLoopResponse],
+]
+
+
+@dataclass(frozen=True)
+class ProviderDefinition:
+    """Describe one provider available to the interactive runtime."""
+
+    name: ProviderName
+    label: str
+    credential_env_var: str
+    list_models: ModelLister
+    create_provider: ProviderFactory
+
+
 def create_openai_provider(
     config: AgentRunConfig,
     api_key: str,
@@ -46,4 +72,17 @@ def create_openai_provider(
         model=config.model,
         tools=tools,
         messages=generate_initial_messages(config.system_prompt, config.user_prompt),
+    )
+
+
+def available_providers() -> tuple[ProviderDefinition, ...]:
+    """Return providers available for interactive agent runs."""
+    return (
+        ProviderDefinition(
+            name="openai",
+            label="OpenAI",
+            credential_env_var="OPENAI_API_KEY",
+            list_models=list_openai_models,
+            create_provider=create_openai_provider,
+        ),
     )

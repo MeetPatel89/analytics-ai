@@ -5,7 +5,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from analytics_agent.agent_runtime import AgentRunConfig
+from analytics_agent.agent_runtime import (
+    AgentRunConfig,
+    available_providers,
+    create_openai_provider,
+)
 from analytics_agent.providers.openai_provider import list_available_models
 from analytics_agent.tools import (
     ToolChain,
@@ -36,6 +40,17 @@ class AgentRunConfigTests(unittest.TestCase):
         self.assertIn("data assistant", default_system_prompt(both))
         self.assertIn("incident-response", default_system_prompt(both))
         self.assertIn("payment-server-01", default_user_prompt(both))
+
+    def test_provider_registry_exposes_openai_runtime_metadata(self) -> None:
+        """The interactive runtime should discover OpenAI through its registry."""
+        providers = available_providers()
+
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0].name, "openai")
+        self.assertEqual(providers[0].label, "OpenAI")
+        self.assertEqual(providers[0].credential_env_var, "OPENAI_API_KEY")
+        self.assertIs(providers[0].list_models, list_available_models)
+        self.assertIs(providers[0].create_provider, create_openai_provider)
 
 
 class ToolChainCompositionTests(unittest.TestCase):

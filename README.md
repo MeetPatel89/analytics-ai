@@ -98,15 +98,17 @@ uv run run_interactive_agent
 
 The flow can:
 
-1. List model IDs visible to the configured OpenAI account.
-2. Select the dataframe chain, incident-response chain, or both.
-3. Accept generated system and user prompts or collect replacements.
-4. Enable raw provider-response and serialized-history diagnostics.
-5. Show a summary and require confirmation before making the model request.
+1. Select a registered provider.
+2. Fetch and select from the model IDs currently visible to that provider account.
+3. Select the dataframe chain, incident-response chain, or both.
+4. Accept generated system and user prompts or collect replacements.
+5. Enable raw provider-response and serialized-history diagnostics.
+6. Show a summary and require confirmation before making the model request.
 
 The `View available providers, models, and tool chains` menu is read-only. Model
-listing still requires `OPENAI_API_KEY` and network access. Configurations are not
-saved between runs.
+listing still requires the selected provider's credential and network access.
+OpenAI currently uses `OPENAI_API_KEY`. Model lists are fetched fresh and are not
+cached between runs; configurations are not saved.
 
 ## Tool behavior
 
@@ -139,9 +141,11 @@ page responders, or change external state.
 ## Architecture and workflow
 
 The entry points are composition roots: they load configuration, assemble tool
-definitions and schemas, create the provider, and start the shared loop. Domain
-tools remain provider-neutral; the OpenAI schema factory adapts their Pydantic
-input contracts at the provider boundary.
+definitions and schemas, create the provider, and start the shared loop. The
+interactive runtime uses a provider registry for display metadata, credential
+lookup, model discovery, and provider construction. Domain tools remain
+provider-neutral; the OpenAI schema factory adapts their Pydantic input contracts
+at the provider boundary.
 
 For each model turn:
 
@@ -162,7 +166,8 @@ final response is produced.
 | --- | --- | --- |
 | `OPENAI_API_KEY` | none | Required for model listing and agent runs; loaded from the environment or `.env`. |
 | Static entry-point model | `gpt-4o-mini` | Used by `run_dataframe_agent` and `run_incident_agent`. |
-| Interactive model | none | Selected from IDs returned for the configured account. |
+| Interactive provider | `openai` only | Explicitly selected from the provider registry. |
+| Interactive model | none | Fetched after provider selection and selected from IDs returned for the configured account. |
 | CSV directory | `analytics_agent/data/` | Local, Git-ignored, and required only for the dataframe chain. |
 | Maximum model turns | `10` | The loop stops without a final response after this limit. |
 | Verbose diagnostics | off | Available through the interactive flow. |

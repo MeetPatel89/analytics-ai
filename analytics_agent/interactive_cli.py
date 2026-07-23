@@ -10,8 +10,11 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from analytics_agent.agent_runtime import AgentRunConfig, create_openai_provider
-from analytics_agent.providers.openai_provider import list_available_models
+from analytics_agent.agent_runtime import (
+    AgentRunConfig,
+    ProviderDefinition,
+    available_providers,
+)
 from analytics_agent.tools import (
     ToolChain,
     available_tool_chains,
@@ -27,8 +30,13 @@ MODEL_PAGE_SIZE = 20
 class InteractiveCLI:
     """Prompt for agent configuration and run the selected tool loop."""
 
-    def __init__(self, console: Console | None = None) -> None:
+    def __init__(
+        self,
+        console: Console | None = None,
+        providers: tuple[ProviderDefinition, ...] | None = None,
+    ) -> None:
         self.console = console or Console()
+        self.providers = providers if providers is not None else available_providers()
 
     def run(self) -> None:
         """Run the top-level interactive menu until the user exits."""
@@ -58,16 +66,19 @@ class InteractiveCLI:
                 return
 
     def _configure_and_run(self) -> None:
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        provider_definition = self._select_provider()
+        if provider_definition is None:
+            return
+
+        api_key = os.getenv(provider_definition.credential_env_var, "").strip()
         if not api_key:
             self.console.print(
-                "[red]OPENAI_API_KEY is not configured. Add it to .env and try "
-                "again.[/red]"
+                f"[red]{provider_definition.credential_env_var} is not configured. "
+                "Add it to .env and try again.[/red]"
             )
             return
 
-        self.console.print("Provider: OpenAI")
-        models = self._load_models(api_key)
+        models = self._load_models(provider_definition, api_key)
         if not models:
             return
         model = self._select_model(models)
@@ -89,7 +100,7 @@ class InteractiveCLI:
 
         try:
             config = AgentRunConfig(
-                provider="openai",
+                provider=provider_definition.name,
                 model=model,
                 tool_chains=tool_chains,
                 system_prompt=system_prompt,
@@ -100,7 +111,7 @@ class InteractiveCLI:
             self.console.print(f"[red]Invalid configuration: {exc}[/red]")
             return
 
-        self._show_run_summary(config)
+        self._show_run_summary(config, provider_definition.label)
         if not Confirm.ask(
             "Start this agent run?", default=False, console=self.console
         ):
@@ -109,22 +120,55 @@ class InteractiveCLI:
 
         try:
             tool_registry, tool_schemas = build_tools_for_chains(config.tool_chains)
-            provider = create_openai_provider(config, api_key, tool_schemas)
+            provider = provider_definition.create_provider(
+                config,
+                api_key,
+                tool_schemas,
+            )
             run_tool_loop(provider, tool_registry, verbose=config.verbose)
         except KeyboardInterrupt:
             self.console.print("\nRun interrupted.")
         except Exception as exc:
             self.console.print(f"[red]Agent run failed: {exc}[/red]")
 
-    def _load_models(self, api_key: str) -> list[str] | None:
+    def _select_provider(self) -> ProviderDefinition | None:
+        """Display registered providers and return the selected definition."""
+        if not self.providers:
+            self.console.print("[yellow]No providers are registered.[/yellow]")
+            return None
+
+        table = Table(title="Providers")
+        table.add_column("#", justify="right")
+        table.add_column("Provider")
+        for index, provider in enumerate(self.providers, start=1):
+            table.add_row(str(index), provider.label)
+        self.console.print(table)
+
+        choices = [str(index) for index in range(1, len(self.providers) + 1)]
+        choice = Prompt.ask(
+            "Select a provider or (q)uit",
+            choices=[*choices, "q"],
+            default="1",
+            console=self.console,
+        ).lower()
+        if choice == "q":
+            return None
+        return self.providers[int(choice) - 1]
+
+    def _load_models(
+        self,
+        provider: ProviderDefinition,
+        api_key: str,
+    ) -> list[str] | None:
         try:
-            models = list_available_models(api_key)
+            models = provider.list_models(api_key)
         except (RuntimeError, ValueError) as exc:
             self.console.print(f"[red]{exc}[/red]")
             return None
         if not models:
             self.console.print(
-                "[yellow]No models are available for this API key.[/yellow]"
+                f"[yellow]No {provider.label} models are available for this API "
+                "key.[/yellow]"
             )
             return None
         return models
@@ -245,13 +289,24 @@ class InteractiveCLI:
 
     def _show_available_configuration(self) -> None:
         """Display supported built-ins and account configuration without secrets."""
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.console.print(
             "[bold]Saved profiles:[/bold] none (built-in configuration only)"
         )
-        self.console.print(
-            f"[bold]OpenAI API key configured:[/bold] {'yes' if api_key else 'no'}"
-        )
+
+        provider_table = Table(title="Registered providers")
+        provider_table.add_column("Provider")
+        provider_table.add_column("Credential")
+        provider_table.add_column("Configured")
+        provider_credentials: list[tuple[ProviderDefinition, str]] = []
+        for provider in self.providers:
+            api_key = os.getenv(provider.credential_env_var, "").strip()
+            provider_credentials.append((provider, api_key))
+            provider_table.add_row(
+                provider.label,
+                provider.credential_env_var,
+                "yes" if api_key else "no",
+            )
+        self.console.print(provider_table)
 
         table = Table(title="Registered tool chains")
         table.add_column("Tool chain")
@@ -260,30 +315,36 @@ class InteractiveCLI:
             table.add_row(option.label, ", ".join(option.tool_names))
         self.console.print(table)
 
-        if not api_key:
-            self.console.print(
-                "Set OPENAI_API_KEY to inspect account-available models."
-            )
-            return
-        models = self._load_models(api_key)
-        if models:
-            preview = "\n".join(models[:MODEL_PAGE_SIZE])
-            suffix = "\n..." if len(models) > MODEL_PAGE_SIZE else ""
-            self.console.print(
-                Panel(
-                    f"{len(models)} available models\n\n{preview}{suffix}",
-                    title="OpenAI models",
+        for provider, api_key in provider_credentials:
+            if not api_key:
+                self.console.print(
+                    f"Set {provider.credential_env_var} to inspect "
+                    f"account-available {provider.label} models."
                 )
-            )
+                continue
+            models = self._load_models(provider, api_key)
+            if models:
+                preview = "\n".join(models[:MODEL_PAGE_SIZE])
+                suffix = "\n..." if len(models) > MODEL_PAGE_SIZE else ""
+                self.console.print(
+                    Panel(
+                        f"{len(models)} available models\n\n{preview}{suffix}",
+                        title=f"{provider.label} models",
+                    )
+                )
 
-    def _show_run_summary(self, config: AgentRunConfig) -> None:
+    def _show_run_summary(
+        self,
+        config: AgentRunConfig,
+        provider_label: str,
+    ) -> None:
         """Display the selected values before requiring execution confirmation."""
         chains = ", ".join(chain.replace("_", " ") for chain in config.tool_chains)
         self.console.print(
             Panel(
                 "\n".join(
                     [
-                        f"Provider: {config.provider}",
+                        f"Provider: {provider_label}",
                         f"Model: {config.model}",
                         f"Tool chains: {chains}",
                         f"Verbose diagnostics: {'yes' if config.verbose else 'no'}",
