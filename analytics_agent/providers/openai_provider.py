@@ -1,5 +1,7 @@
 """OpenAI provider implementation backed by the Responses API."""
 
+from __future__ import annotations
+
 from types import SimpleNamespace
 
 from openai import OpenAI
@@ -12,6 +14,7 @@ from analytics_agent.messages import (
     function_call_output_message,
 )
 from analytics_agent.providers.base import BaseProvider
+from analytics_agent.providers.generation import StructuredOutputT
 
 
 def list_available_models(api_key: str) -> list[str]:
@@ -25,6 +28,59 @@ def list_available_models(api_key: str) -> list[str]:
         raise RuntimeError(f"Unable to list OpenAI models: {exc}") from exc
 
     return sorted({model.id for model in models.data})
+
+
+class OpenAIGenerationModel:
+    """Provide text and structured generation through OpenAI Responses."""
+
+    def __init__(self, api_key: str, model: str) -> None:
+        if not api_key.strip():
+            raise ValueError("API key is required for the generation model.")
+        if not model.strip():
+            raise ValueError("Model is required for the generation model.")
+        self._client = OpenAI(api_key=api_key)
+        self._model = model
+
+    def generate_text(self, prompt: str) -> str:
+        """Generate plain text and reject missing or refused output."""
+        try:
+            response = self._client.responses.create(
+                model=self._model,
+                input=prompt,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Generation model request failed: {exc}") from exc
+
+        refusal = _response_refusal(response)
+        if refusal:
+            raise RuntimeError(f"Generation model refused the request: {refusal}")
+        output_text = getattr(response, "output_text", None)
+        if not isinstance(output_text, str) or not output_text.strip():
+            raise RuntimeError("Generation model returned no text.")
+        return output_text.strip()
+
+    def generate_structured(
+        self,
+        prompt: str,
+        response_model: type[StructuredOutputT],
+    ) -> StructuredOutputT:
+        """Generate and validate one Pydantic structured output."""
+        try:
+            response = self._client.responses.parse(
+                model=self._model,
+                input=prompt,
+                text_format=response_model,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Generation model request failed: {exc}") from exc
+
+        refusal = _response_refusal(response)
+        if refusal:
+            raise RuntimeError(f"Generation model refused the request: {refusal}")
+        parsed = getattr(response, "output_parsed", None)
+        if parsed is None:
+            raise RuntimeError("Generation model returned no structured output.")
+        return response_model.model_validate(parsed)
 
 
 class OpenAIProvider(BaseProvider):
@@ -73,3 +129,13 @@ class OpenAIProvider(BaseProvider):
             tools=self._tools,
             input=self.serialized_history("openai"),
         )
+
+
+def _response_refusal(response: object) -> str | None:
+    output = getattr(response, "output", ()) or ()
+    for item in output:
+        for content in getattr(item, "content", ()) or ():
+            if getattr(content, "type", None) == "refusal":
+                refusal = getattr(content, "refusal", "")
+                return str(refusal) or "request refused"
+    return None

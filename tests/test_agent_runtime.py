@@ -3,16 +3,22 @@
 import importlib
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from analytics_agent.agent_runtime import (
     AgentRunConfig,
+    ProviderDefinition,
     available_providers,
+    build_run_tools,
     create_openai_provider,
 )
-from analytics_agent.providers.openai_provider import list_available_models
+from analytics_agent.providers.openai_provider import (
+    OpenAIGenerationModel,
+    list_available_models,
+)
 from analytics_agent.tools import (
     ToolChain,
+    ToolChainDependencies,
     build_tools_for_chains,
     default_system_prompt,
     default_user_prompt,
@@ -51,6 +57,10 @@ class AgentRunConfigTests(unittest.TestCase):
         self.assertEqual(providers[0].credential_env_var, "OPENAI_API_KEY")
         self.assertIs(providers[0].list_models, list_available_models)
         self.assertIs(providers[0].create_provider, create_openai_provider)
+        self.assertIs(
+            providers[0].create_generation_model,
+            OpenAIGenerationModel,
+        )
 
 
 class ToolChainCompositionTests(unittest.TestCase):
@@ -70,13 +80,74 @@ class ToolChainCompositionTests(unittest.TestCase):
     def test_combined_chains_include_all_tools_and_schemas(self) -> None:
         """Both chains should preserve order and have matching OpenAI schemas."""
         registry, schemas = build_tools_for_chains(
-            (ToolChain.DATAFRAME, ToolChain.INCIDENT_RESPONSE)
+            (ToolChain.DATAFRAME, ToolChain.INCIDENT_RESPONSE),
+            ToolChainDependencies(create_generation_model=Mock()),
         )
 
         self.assertEqual(len(registry), 11)
         self.assertEqual(list(registry), [schema["name"] for schema in schemas])
         self.assertIn("list_dataframes", registry)
         self.assertIn("get_server_health", registry)
+
+    def test_sql_defaults_describe_the_three_step_workflow(self) -> None:
+        """SQL-only prompts should exercise lookup, analysis, and visualization."""
+        system = default_system_prompt((ToolChain.SQL_ANALYZER,))
+        user = default_user_prompt((ToolChain.SQL_ANALYZER,))
+
+        self.assertIn("lookup_sales_data first", system)
+        self.assertIn("analyze_sales_data", system)
+        self.assertIn("generate_visualization", system)
+        self.assertIn("analyze", user)
+        self.assertIn("visualization", user)
+
+
+class RunToolCompositionTests(unittest.TestCase):
+    """Verify provider generation capabilities are bound once at runtime."""
+
+    def _definition(self, generation_factory: Mock) -> ProviderDefinition:
+        return ProviderDefinition(
+            name="openai",
+            label="OpenAI",
+            credential_env_var="OPENAI_API_KEY",
+            list_models=Mock(),
+            create_provider=Mock(),
+            create_generation_model=generation_factory,
+        )
+
+    def _config(self, chain: ToolChain) -> AgentRunConfig:
+        return AgentRunConfig(
+            provider="openai",
+            model="selected-model",
+            tool_chains=(chain,),
+            system_prompt="system",
+            user_prompt="task",
+        )
+
+    def test_generation_model_is_lazy_for_chains_that_do_not_use_it(self) -> None:
+        """Composing an unrelated chain should not construct a generation client."""
+        generation_factory = Mock(return_value=Mock())
+
+        registry, _ = build_run_tools(
+            self._definition(generation_factory),
+            self._config(ToolChain.INCIDENT_RESPONSE),
+            "test-key",
+        )
+
+        self.assertIn("get_server_health", registry)
+        generation_factory.assert_not_called()
+
+    def test_sql_chain_binds_the_selected_credential_and_model(self) -> None:
+        """SQL composition should request the provider's generic capability."""
+        generation_factory = Mock(return_value=Mock())
+
+        registry, _ = build_run_tools(
+            self._definition(generation_factory),
+            self._config(ToolChain.SQL_ANALYZER),
+            "test-key",
+        )
+
+        self.assertIn("lookup_sales_data", registry)
+        generation_factory.assert_called_once_with("test-key", "selected-model")
 
 
 class OpenAIModelDiscoveryTests(unittest.TestCase):

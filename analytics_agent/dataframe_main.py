@@ -5,9 +5,13 @@ import os
 import dotenv
 
 from analytics_agent.messages import generate_initial_messages
-from analytics_agent.providers.openai_provider import OpenAIProvider
+from analytics_agent.providers.openai_provider import (
+    OpenAIGenerationModel,
+    OpenAIProvider,
+)
 from analytics_agent.tools import (
     ToolChain,
+    ToolChainDependencies,
     build_tools_for_chains,
     default_system_prompt,
     default_user_prompt,
@@ -18,15 +22,25 @@ from analytics_agent.tools import (
 def main() -> None:
     """Run the main entry point for the analytics agent tool-calling loop."""
     dotenv.load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    model = "gpt-4o-mini"
     tool_chains = (ToolChain.DATAFRAME,)
-    tool_registry, tool_schemas = build_tools_for_chains(tool_chains)
+    tool_registry, tool_schemas = build_tools_for_chains(
+        tool_chains,
+        ToolChainDependencies(
+            create_generation_model=lambda: OpenAIGenerationModel(
+                api_key,
+                model,
+            )
+        ),
+    )
     messages = generate_initial_messages(
         default_system_prompt(tool_chains),
         default_user_prompt(tool_chains),
     )
     provider = OpenAIProvider(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-mini",
+        api_key=api_key,
+        model=model,
         tools=tool_schemas,
         messages=messages,
     )

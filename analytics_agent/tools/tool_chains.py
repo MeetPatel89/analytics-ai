@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from analytics_agent.providers.generation import GenerationModel
 from analytics_agent.tools.dataframe.catalog import DataframeCatalog, load_dataset_specs
 from analytics_agent.tools.dataframe.dataframe_registry import (
     build_dataframe_definitions,
@@ -18,6 +20,9 @@ from analytics_agent.tools.provider_factories import (
     create_openai_tools,
 )
 from analytics_agent.tools.registry import ToolDefinition, ToolRegistry
+from analytics_agent.tools.sql_analyzer.registry import (
+    build_sql_analyzer_definitions,
+)
 
 
 class ToolChain(StrEnum):
@@ -36,6 +41,18 @@ class ToolChainInfo:
     label: str
     description: str
     tool_names: tuple[str, ...]
+
+
+GenerationModelFactory = Callable[[], GenerationModel]
+
+
+@dataclass(frozen=True)
+class ToolChainDependencies:
+    """Lazy runtime dependencies shared by selectable tool-chain builders."""
+
+    create_generation_model: GenerationModelFactory
+    data_path: Path | None = None
+    sql_data_path: Path | None = None
 
 
 _TOOL_CHAIN_INFO = {
@@ -69,8 +86,12 @@ _TOOL_CHAIN_INFO = {
     ToolChain.SQL_ANALYZER: ToolChainInfo(
         chain=ToolChain.SQL_ANALYZER,
         label="SQL analyzer",
-        description="Analyze SQL queries and provide insights.",
-        tool_names=("analyze_sql",),
+        description="Query local sales data, analyze results, and draft charts.",
+        tool_names=(
+            "lookup_sales_data",
+            "analyze_sales_data",
+            "generate_visualization",
+        ),
     ),
 }
 
@@ -82,20 +103,46 @@ def available_tool_chains() -> tuple[ToolChainInfo, ...]:
 
 def build_tools_for_chains(
     chains: tuple[ToolChain, ...],
-    *,
-    data_path: Path | None = None,
+    dependencies: ToolChainDependencies,
 ) -> tuple[ToolRegistry, list[OpenAIToolSchema]]:
     """Compose selected tool chains into one validated OpenAI tool set."""
     definitions: list[ToolDefinition] = []
     for chain in _unique_chains(chains):
-        if chain is ToolChain.DATAFRAME:
-            path = data_path or Path(__file__).resolve().parents[1] / "data"
-            catalog = DataframeCatalog.from_specs(load_dataset_specs(str(path)))
-            definitions.extend(build_dataframe_definitions(catalog))
-        else:
-            definitions.extend(build_incident_response_definitions())
+        definitions.extend(_TOOL_CHAIN_BUILDERS[chain](dependencies))
 
     return create_openai_tools(definitions)
+
+
+def _build_dataframe_tools(
+    dependencies: ToolChainDependencies,
+) -> list[ToolDefinition]:
+    path = dependencies.data_path or Path(__file__).resolve().parents[1] / "data"
+    catalog = DataframeCatalog.from_specs(load_dataset_specs(str(path)))
+    return build_dataframe_definitions(catalog)
+
+
+def _build_incident_response_tools(
+    dependencies: ToolChainDependencies,
+) -> list[ToolDefinition]:
+    del dependencies
+    return build_incident_response_definitions()
+
+
+def _build_sql_analyzer_tools(
+    dependencies: ToolChainDependencies,
+) -> list[ToolDefinition]:
+    return build_sql_analyzer_definitions(
+        dependencies.create_generation_model(),
+        dependencies.sql_data_path,
+    )
+
+
+ToolChainBuilder = Callable[[ToolChainDependencies], list[ToolDefinition]]
+_TOOL_CHAIN_BUILDERS: dict[ToolChain, ToolChainBuilder] = {
+    ToolChain.DATAFRAME: _build_dataframe_tools,
+    ToolChain.INCIDENT_RESPONSE: _build_incident_response_tools,
+    ToolChain.SQL_ANALYZER: _build_sql_analyzer_tools,
+}
 
 
 def default_system_prompt(chains: tuple[ToolChain, ...]) -> str:
@@ -116,11 +163,12 @@ def default_system_prompt(chains: tuple[ToolChain, ...]) -> str:
         )
     if ToolChain.SQL_ANALYZER in selected:
         prompts.append(
-            "Generate an SQL query based on a prompt. Do not reply with anything "
-            "besides the SQL query.\n"
-            "The prompt is: {prompt}.\n"
-            "The available columns are: {columns}.\n"
-            "The table name is: {table_name}.\n"
+            "You are a sales-data assistant. Call lookup_sales_data first to "
+            "produce a validated, bounded result from the local sales table. Pass "
+            "that complete result envelope unchanged to analyze_sales_data for "
+            "interpretation or generate_visualization for Python plotting code. "
+            "Never invent rows, and remind the user to review generated code "
+            "before executing it."
         )
     if len(selected) > 1:
         prompts.append("Use only the tool chain relevant to the user's request.")
@@ -134,6 +182,16 @@ def default_user_prompt(chains: tuple[ToolChain, ...]) -> str:
         return "What are the visiting hours in the hospital?"
     if selected == (ToolChain.INCIDENT_RESPONSE,):
         return "Investigate payment-server-01 and resolve the incident."
+    if selected == (ToolChain.SQL_ANALYZER,):
+        return (
+            "Look up a useful sales trend, analyze the returned result, and generate "
+            "Python visualization code for it."
+        )
+    if ToolChain.SQL_ANALYZER in selected:
+        return (
+            "Use the sales lookup to identify and analyze a useful trend, then "
+            "generate Python visualization code for the result."
+        )
     return (
         "Investigate payment-server-01. Use dataframe tools only when they provide "
         "relevant supporting information."

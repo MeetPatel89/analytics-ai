@@ -14,11 +14,11 @@ from analytics_agent.agent_runtime import (
     AgentRunConfig,
     ProviderDefinition,
     available_providers,
+    build_run_tools,
 )
 from analytics_agent.tools import (
     ToolChain,
     available_tool_chains,
-    build_tools_for_chains,
     default_system_prompt,
     default_user_prompt,
     run_tool_loop,
@@ -86,9 +86,6 @@ class InteractiveCLI:
             return
 
         tool_chains = self._select_tool_chains()
-        print("--------------------------------")
-        print(tool_chains)
-        print("--------------------------------")
         system_prompt = self._select_system_prompt(tool_chains)
         user_prompt = Prompt.ask(
             "Task for the agent",
@@ -122,7 +119,11 @@ class InteractiveCLI:
             return
 
         try:
-            tool_registry, tool_schemas = build_tools_for_chains(config.tool_chains)
+            tool_registry, tool_schemas = build_run_tools(
+                provider_definition,
+                config,
+                api_key,
+            )
             provider = provider_definition.create_provider(
                 config,
                 api_key,
@@ -254,7 +255,7 @@ class InteractiveCLI:
 
         while True:
             raw_selection = Prompt.ask(
-                "Select one or both chains (for example: 1,2)",
+                "Select one or more tool chains (for example: 1,2 or 3)",
                 default="1",
                 console=self.console,
             )
@@ -269,7 +270,6 @@ class InteractiveCLI:
                     "[yellow]Enter one or more valid comma-separated numbers.[/yellow]"
                 )
                 continue
-
             return tuple(dict.fromkeys(choices[index - 1].chain for index in indexes))
 
     def _select_system_prompt(self, tool_chains: tuple[ToolChain, ...]) -> str:

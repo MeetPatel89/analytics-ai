@@ -25,6 +25,7 @@ class ToolDefinition:
     handler: ToolHandler
     input_model: type[BaseModel]
     description: str | None = None
+    output_model: type[BaseModel] | None = None
 
     @property
     def name(self) -> str:
@@ -78,13 +79,19 @@ def _validated_tool(definition: ToolDefinition) -> ToolFunction:
     def wrapped(**kwargs: object) -> str:
         try:
             validated = definition.input_model.model_validate(kwargs)
-            arguments = {
-                name: getattr(validated, name)
-                for name in definition.input_model.model_fields
-            }
-            return str(definition.handler(**arguments))
         except ValidationError as exc:
             return f"Invalid arguments for tool '{definition.name}': {exc}"
+
+        arguments = {
+            name: getattr(validated, name)
+            for name in definition.input_model.model_fields
+        }
+        try:
+            result = definition.handler(**arguments)
+            if definition.output_model is not None:
+                validated_result = definition.output_model.model_validate(result)
+                return validated_result.model_dump_json()
+            return str(result)
         except Exception as exc:
             return f"Tool '{definition.name}' failed: {exc}"
 

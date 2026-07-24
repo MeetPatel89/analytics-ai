@@ -19,12 +19,14 @@ class InteractiveCLIProviderTests(unittest.TestCase):
         self.output = io.StringIO()
         self.list_models = Mock(return_value=["model-a"])
         self.create_provider = Mock(return_value=Mock())
+        self.create_generation_model = Mock(return_value=Mock())
         self.provider = ProviderDefinition(
             name="openai",
             label="OpenAI",
             credential_env_var="OPENAI_API_KEY",
             list_models=self.list_models,
             create_provider=self.create_provider,
+            create_generation_model=self.create_generation_model,
         )
         self.cli = InteractiveCLI(
             console=Console(file=self.output, force_terminal=False),
@@ -128,9 +130,9 @@ class InteractiveCLIProviderTests(unittest.TestCase):
                 side_effect=[False, True],
             ),
             patch(
-                "analytics_agent.interactive_cli.build_tools_for_chains",
+                "analytics_agent.interactive_cli.build_run_tools",
                 return_value=(tool_registry, tool_schemas),
-            ),
+            ) as build_run_tools,
             patch("analytics_agent.interactive_cli.run_tool_loop") as run_tool_loop,
         ):
             self.cli._configure_and_run()
@@ -138,6 +140,11 @@ class InteractiveCLIProviderTests(unittest.TestCase):
         config = self.create_provider.call_args.args[0]
         self.assertEqual(config.provider, "openai")
         self.assertEqual(config.model, "model-a")
+        build_run_tools.assert_called_once_with(
+            self.provider,
+            config,
+            "test-key",
+        )
         self.create_provider.assert_called_once_with(
             config,
             "test-key",
@@ -147,6 +154,50 @@ class InteractiveCLIProviderTests(unittest.TestCase):
             self.create_provider.return_value,
             tool_registry,
             verbose=False,
+        )
+
+    def test_sql_chain_uses_the_same_runtime_composition_path(self) -> None:
+        """The CLI should not contain SQL-specific dependency wiring."""
+        tool_registry = Mock()
+        tool_schemas = [{"type": "function"}]
+        with (
+            patch.object(self.cli, "_select_provider", return_value=self.provider),
+            patch(
+                "analytics_agent.interactive_cli.os.getenv",
+                return_value="test-key",
+            ),
+            patch.object(self.cli, "_select_model", return_value="model-a"),
+            patch.object(
+                self.cli,
+                "_select_tool_chains",
+                return_value=(ToolChain.SQL_ANALYZER,),
+            ),
+            patch.object(
+                self.cli,
+                "_select_system_prompt",
+                return_value="system prompt",
+            ),
+            patch(
+                "analytics_agent.interactive_cli.Prompt.ask",
+                return_value="user task",
+            ),
+            patch(
+                "analytics_agent.interactive_cli.Confirm.ask",
+                side_effect=[False, True],
+            ),
+            patch(
+                "analytics_agent.interactive_cli.build_run_tools",
+                return_value=(tool_registry, tool_schemas),
+            ) as build_run_tools,
+            patch("analytics_agent.interactive_cli.run_tool_loop"),
+        ):
+            self.cli._configure_and_run()
+
+        config = self.create_provider.call_args.args[0]
+        build_run_tools.assert_called_once_with(
+            self.provider,
+            config,
+            "test-key",
         )
 
 

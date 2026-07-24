@@ -1,10 +1,12 @@
 [project]
 name = "analytics-agent"
 version = "0.1.0"
-description = "Tool-calling agents for local CSV analysis and simulated incident response"
+description = "Tool-calling agents for local CSV and sales analysis"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "duckdb>=1.4.0",
+    "matplotlib>=3.10.0",
     "openai>=2.45.0",
     "pandas>=3.0.3",
     "python-dotenv>=1.2.2",
