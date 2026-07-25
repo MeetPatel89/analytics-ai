@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 ToolFunction = Callable[..., str]
 ToolHandler = Callable[..., object]
+ToolOutputFormatter = Callable[[str], str]
 
 
 class ToolInput(BaseModel):
@@ -26,6 +27,7 @@ class ToolDefinition:
     input_model: type[BaseModel]
     description: str | None = None
     output_model: type[BaseModel] | None = None
+    output_formatter: ToolOutputFormatter | None = None
 
     @property
     def name(self) -> str:
@@ -39,10 +41,12 @@ class ToolRegistry(Mapping[str, ToolFunction]):
     def __init__(self, definitions: list[ToolDefinition]) -> None:
         self._definitions = tuple(definitions)
         self._tools: dict[str, ToolFunction] = {}
+        self._definitions_by_name: dict[str, ToolDefinition] = {}
         for definition in self._definitions:
             if definition.name in self._tools:
                 raise ValueError(f"Duplicate tool name: {definition.name}")
             self._tools[definition.name] = _validated_tool(definition)
+            self._definitions_by_name[definition.name] = definition
 
     @property
     def definitions(self) -> tuple[ToolDefinition, ...]:
@@ -55,6 +59,16 @@ class ToolRegistry(Mapping[str, ToolFunction]):
         if tool is None:
             return f"Unknown tool: {name}"
         return tool(**arguments)
+
+    def format_output(self, name: str, output: str) -> str:
+        """Format a tool result for display without changing the model payload."""
+        definition = self._definitions_by_name.get(name)
+        if definition is None or definition.output_formatter is None:
+            return output
+        try:
+            return definition.output_formatter(output)
+        except Exception:
+            return output
 
     def __getitem__(self, name: str) -> ToolFunction:
         """Return a validated tool by name."""

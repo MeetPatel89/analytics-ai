@@ -102,10 +102,16 @@ class VisualizationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    chart_type: Literal["line", "bar", "scatter"]
-    x_axis: NonEmptyString
-    y_axis: NonEmptyString
-    title: NonEmptyString
+    chart_type: Literal["line", "bar", "scatter"] = Field(
+        description="The type of chart to generate."
+    )
+    x_axis: NonEmptyString = Field(
+        description="The column name to use for the x-axis of the chart."
+    )
+    y_axis: NonEmptyString = Field(
+        description="The column name to use for the y-axis of the chart."
+    )
+    title: NonEmptyString = Field(description="The title of the chart.")
 
 
 class VisualizationCode(BaseModel):

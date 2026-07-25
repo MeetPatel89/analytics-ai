@@ -51,7 +51,9 @@ def run_tool_loop(
             else:
                 print(f"Calling tool: {call.name}({json.dumps(arguments)})")
                 output = tool_registry.execute(call.name, arguments)
-            print(f"Tool result: {output}")
+            displayed_output = tool_registry.format_output(call.name, output)
+            separator = "\n" if "\n" in displayed_output else " "
+            print(f"Tool result:{separator}{displayed_output}")
             provider.add_tool_output(call.call_id, output)
 
     print("Max turns reached without a final response.")

@@ -11,6 +11,9 @@ from analytics_agent.messages import FunctionCallMessage, function_call_message
 from analytics_agent.tools import (
     DataframeCatalog,
     DatasetSpec,
+    ToolDefinition,
+    ToolInput,
+    ToolRegistry,
     create_dataframe_tools,
     create_incident_response_tools,
     run_tool_loop,
@@ -93,6 +96,43 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(provider.turn, 2)
         self.assertEqual(provider.tool_outputs[0][0], "call_list_dataframes")
         self.assertIn("Records: 2 rows x 1 columns", provider.tool_outputs[0][1])
+
+    def test_display_formatter_does_not_change_the_provider_tool_output(self) -> None:
+        """Console-friendly output should remain separate from model payloads."""
+
+        class NoInput(ToolInput):
+            """A tool with no arguments."""
+
+        def raw_result() -> str:
+            """Return a structured placeholder payload."""
+            return '{"rows":[[1],[2]]}'
+
+        registry = ToolRegistry(
+            [
+                ToolDefinition(
+                    raw_result,
+                    NoInput,
+                    output_formatter=lambda output: f"formatted table\n{output}",
+                )
+            ]
+        )
+        provider = FakeProvider(
+            function_call_message(
+                call_id="call_raw_result",
+                name="raw_result",
+                arguments_raw="{}",
+            )
+        )
+        console = io.StringIO()
+
+        with contextlib.redirect_stdout(console):
+            run_tool_loop(provider, registry, max_turns=2)
+
+        self.assertEqual(provider.tool_outputs[0][1], '{"rows":[[1],[2]]}')
+        self.assertIn(
+            'Tool result:\nformatted table\n{"rows":[[1],[2]]}',
+            console.getvalue(),
+        )
 
     def test_verbose_output_includes_provider_diagnostics(self) -> None:
         """Verbose runs should retain the raw provider diagnostics."""

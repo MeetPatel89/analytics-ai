@@ -166,12 +166,20 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             [{"sql": "SELECT * FROM sales ORDER BY sale_id"}]
         )
 
-        result = json.loads(registry["lookup_sales_data"](prompt="All sales"))
+        output = registry["lookup_sales_data"](prompt="All sales")
+        result = json.loads(output)
+        displayed = registry.format_output("lookup_sales_data", output)
 
         self.assertEqual(result["returned_row_count"], 50)
         self.assertEqual(len(result["rows"]), 50)
         self.assertTrue(result["truncated"])
         self.assertEqual(result["rows"][-1][0], 49)
+        self.assertIn("shape: (5, 4)", displayed)
+        self.assertIn("│ sale_id", displayed)
+        self.assertIn(
+            "Displayed 5 of 50 returned rows (query result was truncated).",
+            displayed,
+        )
 
     def test_lookup_accepts_a_trailing_statement_terminator(self) -> None:
         """A model-generated trailing semicolon should remain valid SQL."""

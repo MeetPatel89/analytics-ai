@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import duckdb
+import polars as pl
 
 from analytics_agent.providers.generation import GenerationModel, StructuredOutputT
 from analytics_agent.tools.sql_analyzer.models import (
@@ -26,6 +27,7 @@ DEFAULT_SALES_DATA_PATH = (
     / "Store_Sales_Price_Elasticity_Promotions_Data.parquet"
 )
 MAX_QUERY_ROWS = 50
+DEFAULT_DATAFRAME_PREVIEW_ROWS = 5
 
 
 class SQLAnalyzerTools:
@@ -118,6 +120,9 @@ class SQLAnalyzerTools:
             ),
             VisualizationConfig,
         )
+        print("--------------------------------")
+        print(config)
+        print("--------------------------------")
         missing_axes = [
             axis for axis in (config.x_axis, config.y_axis) if axis not in data.columns
         ]
@@ -213,3 +218,27 @@ def _normalize_sales_value(value: object) -> SalesValue:
         return json.dumps(value, allow_nan=False, default=str, sort_keys=True)
     except TypeError, ValueError:
         return str(value)
+
+
+def format_sales_query_result(
+    output: str,
+    preview_rows: int = DEFAULT_DATAFRAME_PREVIEW_ROWS,
+) -> str:
+    """Render a validated sales result as a compact Polars dataframe preview."""
+    result = SalesQueryResult.model_validate_json(output)
+    rows = result.rows[:preview_rows]
+    frame = pl.DataFrame(
+        rows,
+        schema=result.columns,
+        orient="row",
+        strict=False,
+    )
+    with pl.Config(tbl_rows=preview_rows):
+        rendered = str(frame)
+
+    displayed = len(rows)
+    suffix = " (query result was truncated)" if result.truncated else ""
+    return (
+        f"{rendered}\n"
+        f"Displayed {displayed} of {result.returned_row_count} returned rows{suffix}."
+    )

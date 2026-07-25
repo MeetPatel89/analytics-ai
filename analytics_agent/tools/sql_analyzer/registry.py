@@ -14,7 +14,10 @@ from analytics_agent.tools.sql_analyzer.models import (
     LookupSalesDataInput,
     SalesQueryResult,
 )
-from analytics_agent.tools.sql_analyzer.tools import SQLAnalyzerTools
+from analytics_agent.tools.sql_analyzer.tools import (
+    SQLAnalyzerTools,
+    format_sales_query_result,
+)
 
 
 def build_sql_analyzer_definitions(
@@ -28,6 +31,7 @@ def build_sql_analyzer_definitions(
             tools.lookup_sales_data,
             LookupSalesDataInput,
             output_model=SalesQueryResult,
+            output_formatter=format_sales_query_result,
         ),
         ToolDefinition(tools.analyze_sales_data, AnalyzeSalesDataInput),
         ToolDefinition(tools.generate_visualization, GenerateVisualizationInput),
