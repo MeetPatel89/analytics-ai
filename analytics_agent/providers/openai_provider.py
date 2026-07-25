@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from types import SimpleNamespace
 
 from openai import OpenAI
@@ -15,6 +16,7 @@ from analytics_agent.messages import (
 )
 from analytics_agent.providers.base import BaseProvider
 from analytics_agent.providers.generation import StructuredOutputT
+from analytics_agent.tools.provider_factories import OpenAIToolSchema
 
 
 def list_available_models(api_key: str) -> list[str]:
@@ -90,7 +92,7 @@ class OpenAIProvider(BaseProvider):
         self,
         api_key: str,
         model: str,
-        tools: list[dict] | None = None,
+        tools: Sequence[OpenAIToolSchema] | None = None,
         messages: list[ChatMessage] | None = None,
     ) -> None:
         super().__init__()

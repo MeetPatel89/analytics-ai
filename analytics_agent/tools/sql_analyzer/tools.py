@@ -8,15 +8,14 @@ import math
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
 
 from duckdb import DuckDBPyConnection, StatementType
-from pydantic import JsonValue
 
 from analytics_agent.providers.generation import GenerationModel, StructuredOutputT
 from analytics_agent.tools.sql_analyzer.models import (
     SalesQueryResult,
     SalesSQLQuery,
+    SalesValue,
     VisualizationCode,
     VisualizationConfig,
 )
@@ -44,7 +43,11 @@ class SQLAnalyzerTools:
         self._connection: DuckDBPyConnection | None = None
 
     def lookup_sales_data(self, prompt: str) -> SalesQueryResult:
-        """Generate one read-only sales query and return at most 50 rows."""
+        """Run one read-only sales query and return a bounded result envelope.
+
+        The JSON result contains the validated SQL, ordered columns, positional
+        row arrays, returned row count, and truncation status.
+        """
         connection = self._get_connection()
         schema = connection.execute("DESCRIBE sales").fetchall()
         schema_text = "\n".join(
@@ -77,10 +80,7 @@ class SQLAnalyzerTools:
 
         truncated = len(fetched_rows) > MAX_QUERY_ROWS
         normalized_rows = [
-            {
-                column: _normalize_json_value(value)
-                for column, value in zip(columns, row, strict=True)
-            }
+            [_normalize_sales_value(value) for value in row]
             for row in fetched_rows[:MAX_QUERY_ROWS]
         ]
         return SalesQueryResult(
@@ -92,7 +92,7 @@ class SQLAnalyzerTools:
         )
 
     def analyze_sales_data(self, prompt: str, data: SalesQueryResult) -> str:
-        """Analyze a validated sales-query result in response to a user goal."""
+        """Return a grounded text analysis of one validated sales-query result."""
         analysis = self._model.generate_text(
             "Analyze the validated sales-query result below. Base every factual "
             "claim on the supplied data, call out truncation when present, and "
@@ -109,7 +109,7 @@ class SQLAnalyzerTools:
         data: SalesQueryResult,
         visualization_goal: str,
     ) -> str:
-        """Generate syntactically valid pandas/Matplotlib code without running it."""
+        """Return validated pandas/Matplotlib source without executing the code."""
         data_json = data.model_dump_json(indent=2)
         config = self._generate_structured(
             (
@@ -199,31 +199,20 @@ class SQLAnalyzerTools:
         return response_model.model_validate(generated)
 
 
-def _normalize_json_value(value: object) -> JsonValue:
+def _normalize_sales_value(value: object) -> SalesValue:
     if value is None or isinstance(value, (str, bool, int)):
-        return cast(JsonValue, value)
+        return value
     if isinstance(value, float):
-        return cast(JsonValue, value if math.isfinite(value) else None)
+        return value if math.isfinite(value) else None
     if isinstance(value, Decimal):
-        normalized_decimal = (
-            int(value) if value == value.to_integral_value() else float(value)
-        )
-        return cast(JsonValue, normalized_decimal)
+        return int(value) if value == value.to_integral_value() else float(value)
     if isinstance(value, (datetime, date, time)):
-        return cast(JsonValue, value.isoformat())
-    if isinstance(value, dict):
-        return cast(
-            JsonValue,
-            {str(key): _normalize_json_value(item) for key, item in value.items()},
-        )
-    if isinstance(value, (list, tuple)):
-        return cast(JsonValue, [_normalize_json_value(item) for item in value])
+        return value.isoformat()
 
     scalar_item = getattr(value, "item", None)
     if callable(scalar_item):
-        return _normalize_json_value(scalar_item())
+        return _normalize_sales_value(scalar_item())
     try:
-        json.dumps(value, allow_nan=False)
+        return json.dumps(value, allow_nan=False, default=str, sort_keys=True)
     except TypeError, ValueError:
-        return cast(JsonValue, str(value))
-    return cast(JsonValue, value)
+        return str(value)

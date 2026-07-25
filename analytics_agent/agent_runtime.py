@@ -53,7 +53,7 @@ class AgentRunConfig:
 
 ModelLister = Callable[[str], list[str]]
 ProviderFactory = Callable[
-    [AgentRunConfig, str, list[dict[str, object]]],
+    [AgentRunConfig, str, list[OpenAIToolSchema]],
     ToolLoopProvider[ToolLoopResponse],
 ]
 
@@ -73,7 +73,7 @@ class ProviderDefinition:
 def create_openai_provider(
     config: AgentRunConfig,
     api_key: str,
-    tools: list[dict[str, object]],
+    tools: list[OpenAIToolSchema],
 ) -> OpenAIProvider:
     """Create an OpenAI provider from an interactive run configuration."""
     return OpenAIProvider(

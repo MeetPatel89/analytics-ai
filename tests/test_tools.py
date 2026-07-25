@@ -6,12 +6,14 @@ import unittest
 from pathlib import Path
 
 import pandas as pd
+from pydantic import Field
 
 from analytics_agent.tools import (
     DataframeCatalog,
     DatasetSpec,
     create_dataframe_tools,
     create_incident_response_tools,
+    create_openai_tools,
     load_dataset_specs,
 )
 from analytics_agent.tools.registry import ToolDefinition, ToolInput, ToolRegistry
@@ -120,6 +122,11 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(list(self.registry), expected_names)
         self.assertEqual([schema["name"] for schema in self.schemas], expected_names)
         self.assertTrue(all(schema["type"] == "function" for schema in self.schemas))
+        self.assertTrue(all(schema["strict"] is True for schema in self.schemas))
+        self.assertNotIn("title", json.dumps(self.schemas))
+        preview_parameters = self.schemas[2]["parameters"]["properties"]
+        self.assertIn("description", preview_parameters["dataset_name"])
+        self.assertIn("description", preview_parameters["limit"])
 
     def test_catalog_inspection_tools_return_expected_content(self) -> None:
         """List, describe, and preview tools should retain their text contracts."""
@@ -233,6 +240,38 @@ class IncidentResponseToolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Duplicate tool name: duplicate"):
             ToolRegistry([first, second])
+
+    def test_openai_factory_rejects_non_strict_object_schemas(self) -> None:
+        """Dynamic object keys should fail before an invalid API request is sent."""
+
+        class DynamicInput(ToolInput):
+            """Arguments containing unsupported dynamic object keys."""
+
+            values: dict[str, str] = Field(
+                description="A mapping with keys determined at runtime."
+            )
+
+        def dynamic_tool(values: dict[str, str]) -> str:
+            """Use a dynamic mapping."""
+            return str(values)
+
+        with self.assertRaisesRegex(ValueError, "additionalProperties to false"):
+            create_openai_tools([ToolDefinition(dynamic_tool, DynamicInput)])
+
+    def test_openai_factory_requires_parameter_descriptions(self) -> None:
+        """Every named parameter should explain its meaning to the model."""
+
+        class UndescribedInput(ToolInput):
+            """Arguments with an undocumented field."""
+
+            value: str
+
+        def undocumented_tool(value: str) -> str:
+            """Use an undocumented value."""
+            return value
+
+        with self.assertRaisesRegex(ValueError, "must include a description"):
+            create_openai_tools([ToolDefinition(undocumented_tool, UndescribedInput)])
 
 
 if __name__ == "__main__":

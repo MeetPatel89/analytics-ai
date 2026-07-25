@@ -171,11 +171,12 @@ The SQL analyzer chain exposes:
 - `generate_visualization`
 
 `lookup_sales_data` asks the selected model for a DuckDB query, validates it, and
-returns a JSON envelope containing the SQL, columns, normalized rows, returned
-row count, and truncation status. `analyze_sales_data` accepts that complete
-envelope and generates a grounded text analysis. `generate_visualization` first
-selects validated line, bar, or scatter axes, then returns self-contained
-pandas/Matplotlib source with the result rows embedded.
+returns a JSON envelope containing the SQL, ordered columns, normalized positional
+row arrays, returned row count, and truncation status. Each row value aligns with
+the column at the same index. `analyze_sales_data` accepts that complete envelope
+and generates a grounded text analysis. `generate_visualization` first selects
+validated line, bar, or scatter axes, then returns self-contained pandas/Matplotlib
+source with the result rows embedded.
 
 Visualization code is syntax-checked but never executed by the application.
 Review generated code before running it.

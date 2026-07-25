@@ -125,8 +125,18 @@ class SQLAnalyzerToolTests(unittest.TestCase):
         ]
         self.assertEqual(list(registry), expected)
         self.assertEqual([schema["name"] for schema in schemas], expected)
+        self.assertTrue(all(schema["strict"] is True for schema in schemas))
+        self.assertNotIn("title", json.dumps(schemas))
+        self.assertEqual(
+            schemas[0]["parameters"]["properties"]["prompt"]["description"],
+            "The sales-data question the generated query must answer.",
+        )
         nested_schema = schemas[1]["parameters"]["$defs"]["SalesQueryResult"]
         self.assertIn("returned_row_count", nested_schema["required"])
+        self.assertEqual(
+            nested_schema["properties"]["rows"]["items"]["type"],
+            "array",
+        )
 
     def test_lookup_executes_aggregation_and_serializes_json_safe_values(self) -> None:
         """Dates and decimals should be normalized in the result envelope."""
@@ -145,8 +155,8 @@ class SQLAnalyzerToolTests(unittest.TestCase):
 
         self.assertEqual(result["columns"], ["sale_date", "revenue"])
         self.assertEqual(result["returned_row_count"], 2)
-        self.assertEqual(result["rows"][0]["sale_date"], "2026-01-01")
-        self.assertEqual(result["rows"][0]["revenue"], 0.25)
+        self.assertEqual(result["rows"][0][0], "2026-01-01")
+        self.assertEqual(result["rows"][0][1], 0.25)
         self.assertFalse(result["truncated"])
         self.assertIn("sale_date", model.structured_prompts[0][0])
 
@@ -161,7 +171,7 @@ class SQLAnalyzerToolTests(unittest.TestCase):
         self.assertEqual(result["returned_row_count"], 50)
         self.assertEqual(len(result["rows"]), 50)
         self.assertTrue(result["truncated"])
-        self.assertEqual(result["rows"][-1]["sale_id"], 49)
+        self.assertEqual(result["rows"][-1][0], 49)
 
     def test_lookup_rejects_malformed_multiple_and_non_select_sql(self) -> None:
         """Only one parsed SELECT statement may reach execution."""
@@ -218,7 +228,7 @@ class SQLAnalyzerToolTests(unittest.TestCase):
         data = SalesQueryResult(
             sql="SELECT region, COUNT(*) AS count FROM sales GROUP BY region",
             columns=["region", "count"],
-            rows=[{"region": "east", "count": 30}],
+            rows=[["east", 30]],
             returned_row_count=1,
             truncated=False,
         )
@@ -231,7 +241,8 @@ class SQLAnalyzerToolTests(unittest.TestCase):
 
         self.assertEqual(result, "East has 30 sales.")
         self.assertIn("Summarize regional sales", model.text_prompts[0])
-        self.assertIn('"region": "east"', model.text_prompts[0])
+        self.assertIn('"columns": [', model.text_prompts[0])
+        self.assertIn('"east"', model.text_prompts[0])
         invalid = registry["analyze_sales_data"](
             prompt="Summarize",
             data={**data.model_dump(), "returned_row_count": 2},
@@ -244,8 +255,8 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             sql="SELECT sale_date, revenue FROM sales LIMIT 2",
             columns=["sale_date", "revenue"],
             rows=[
-                {"sale_date": "2026-01-01", "revenue": 0.25},
-                {"sale_date": "2026-01-02", "revenue": 1.25},
+                ["2026-01-01", 0.25],
+                ["2026-01-02", 1.25],
             ],
             returned_row_count=2,
             truncated=False,
@@ -254,7 +265,8 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             "import pandas as pd\n"
             "import matplotlib.pyplot as plt\n"
             f"rows = {data.rows!r}\n"
-            "df = pd.DataFrame(rows)\n"
+            f"columns = {data.columns!r}\n"
+            "df = pd.DataFrame(rows, columns=columns)\n"
             "df.plot(x='sale_date', y='revenue', kind='line')\n"
             "plt.show()"
         )
@@ -277,7 +289,7 @@ class SQLAnalyzerToolTests(unittest.TestCase):
 
         self.assertEqual(result, code)
         self.assertIn('"chart_type": "line"', model.structured_prompts[1][0])
-        self.assertIn('"sale_date": "2026-01-01"', model.structured_prompts[1][0])
+        self.assertIn('"2026-01-01"', model.structured_prompts[1][0])
 
         _, invalid_axis_registry = self._create_tools(
             [
@@ -370,7 +382,7 @@ class SQLAnalyzerCompositionTests(unittest.TestCase):
             return {
                 "sql": "SELECT 1 AS value",
                 "columns": ["value"],
-                "rows": [{"value": 1}],
+                "rows": [[1]],
                 "returned_row_count": 1,
                 "truncated": False,
             }
@@ -381,7 +393,7 @@ class SQLAnalyzerCompositionTests(unittest.TestCase):
             output_model=SalesQueryResult,
         )
         registry = ToolRegistry([definition])
-        self.assertEqual(json.loads(registry["valid_result"]())["rows"], [{"value": 1}])
+        self.assertEqual(json.loads(registry["valid_result"]())["rows"], [[1]])
 
         def invalid_result() -> dict[str, object]:
             return {"sql": "SELECT 1"}
