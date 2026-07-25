@@ -9,7 +9,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
-from duckdb import DuckDBPyConnection, StatementType
+import duckdb
 
 from analytics_agent.providers.generation import GenerationModel, StructuredOutputT
 from analytics_agent.tools.sql_analyzer.models import (
@@ -40,7 +40,7 @@ class SQLAnalyzerTools:
         self._data_path = (
             Path(data_path) if data_path is not None else DEFAULT_SALES_DATA_PATH
         )
-        self._connection: DuckDBPyConnection | None = None
+        self._connection: duckdb.DuckDBPyConnection | None = None
 
     def lookup_sales_data(self, prompt: str) -> SalesQueryResult:
         """Run one read-only sales query and return a bounded result envelope.
@@ -67,12 +67,9 @@ class SQLAnalyzerTools:
         sql = self._validate_select(connection, generated.sql)
 
         try:
-            cursor = connection.execute(
-                f"SELECT * FROM ({sql}) AS generated_sales_query "
-                f"LIMIT {MAX_QUERY_ROWS + 1}"
-            )
-            columns = [description[0] for description in cursor.description]
-            fetched_rows = cursor.fetchall()
+            result = connection.sql(sql).limit(MAX_QUERY_ROWS + 1)
+            columns = result.columns
+            fetched_rows = result.fetchall()
         except Exception as exc:
             raise ValueError(
                 f"Generated sales query could not be executed: {exc}"
@@ -151,7 +148,7 @@ class SQLAnalyzerTools:
             ) from exc
         return source
 
-    def _get_connection(self) -> DuckDBPyConnection:
+    def _get_connection(self) -> duckdb.DuckDBPyConnection:
         if self._connection is not None:
             return self._connection
         if not self._data_path.is_file():
@@ -159,7 +156,7 @@ class SQLAnalyzerTools:
                 f"Sales Parquet file was not found: {self._data_path}"
             )
 
-        connection = DuckDBPyConnection(database=":memory:")
+        connection = duckdb.connect(database=":memory:")
         try:
             connection.execute(
                 "CREATE TABLE sales AS SELECT * FROM read_parquet(?)",
@@ -176,7 +173,7 @@ class SQLAnalyzerTools:
 
     @staticmethod
     def _validate_select(
-        connection: DuckDBPyConnection,
+        connection: duckdb.DuckDBPyConnection,
         sql: str,
     ) -> str:
         try:
@@ -186,7 +183,7 @@ class SQLAnalyzerTools:
         if len(statements) != 1:
             raise ValueError("Generated SQL must contain exactly one statement.")
         statement = statements[0]
-        if statement.type != StatementType.SELECT:
+        if statement.type != duckdb.StatementType.SELECT:
             raise ValueError("Generated SQL must be a SELECT statement.")
         return statement.query.strip()
 

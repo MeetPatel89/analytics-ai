@@ -161,7 +161,7 @@ class SQLAnalyzerToolTests(unittest.TestCase):
         self.assertIn("sale_date", model.structured_prompts[0][0])
 
     def test_lookup_caps_rows_and_reports_truncation(self) -> None:
-        """The query wrapper should fetch one extra row to detect truncation."""
+        """Query execution should fetch one extra row to detect truncation."""
         _, registry = self._create_tools(
             [{"sql": "SELECT * FROM sales ORDER BY sale_id"}]
         )
@@ -172,6 +172,34 @@ class SQLAnalyzerToolTests(unittest.TestCase):
         self.assertEqual(len(result["rows"]), 50)
         self.assertTrue(result["truncated"])
         self.assertEqual(result["rows"][-1][0], 49)
+
+    def test_lookup_accepts_a_trailing_statement_terminator(self) -> None:
+        """A model-generated trailing semicolon should remain valid SQL."""
+        _, registry = self._create_tools(
+            [
+                {
+                    "sql": (
+                        "SELECT region, SUM(revenue) AS total_revenue "
+                        "FROM sales GROUP BY region ORDER BY region;"
+                    )
+                }
+            ]
+        )
+
+        result = json.loads(
+            registry["lookup_sales_data"](prompt="Sales totals by region")
+        )
+
+        self.assertEqual(result["columns"], ["region", "total_revenue"])
+        self.assertEqual(result["returned_row_count"], 2)
+        self.assertEqual([row[0] for row in result["rows"]], ["east", "west"])
+        self.assertEqual(
+            result["sql"],
+            (
+                "SELECT region, SUM(revenue) AS total_revenue "
+                "FROM sales GROUP BY region ORDER BY region;"
+            ),
+        )
 
     def test_lookup_rejects_malformed_multiple_and_non_select_sql(self) -> None:
         """Only one parsed SELECT statement may reach execution."""
