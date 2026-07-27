@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 import dotenv
+from opentelemetry.trace import Tracer
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
@@ -16,6 +17,7 @@ from analytics_agent.agent_runtime import (
     available_providers,
     build_run_tools,
 )
+from analytics_agent.observability import configure_tracing, get_tracer
 from analytics_agent.tools import (
     ToolChain,
     available_tool_chains,
@@ -23,6 +25,7 @@ from analytics_agent.tools import (
     default_user_prompt,
     run_tool_loop,
 )
+from analytics_agent.tools.tool_loop import DEFAULT_MAX_TURNS
 
 MODEL_PAGE_SIZE = 20
 
@@ -34,9 +37,11 @@ class InteractiveCLI:
         self,
         console: Console | None = None,
         providers: tuple[ProviderDefinition, ...] | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         self.console = console or Console()
         self.providers = providers if providers is not None else available_providers()
+        self.tracer = tracer if tracer is not None else get_tracer()
 
     def run(self) -> None:
         """Run the top-level interactive menu until the user exits."""
@@ -118,22 +123,30 @@ class InteractiveCLI:
             self.console.print("Run cancelled.")
             return
 
-        try:
-            tool_registry, tool_schemas = build_run_tools(
-                provider_definition,
-                config,
-                api_key,
-            )
-            provider = provider_definition.create_provider(
-                config,
-                api_key,
-                tool_schemas,
-            )
-            run_tool_loop(provider, tool_registry, verbose=config.verbose)
-        except KeyboardInterrupt:
-            self.console.print("\nRun interrupted.")
-        except Exception as exc:
-            self.console.print(f"[red]Agent run failed: {exc}[/red]")
+        with self.tracer.start_as_current_span(
+            "agent_run",
+            attributes={
+                "agent.model": config.model,
+                "agent.tool_chains": tuple(chain.value for chain in config.tool_chains),
+                "agent.max_turns": DEFAULT_MAX_TURNS,
+            },
+        ):
+            try:
+                tool_registry, tool_schemas = build_run_tools(
+                    provider_definition,
+                    config,
+                    api_key,
+                )
+                provider = provider_definition.create_provider(
+                    config,
+                    api_key,
+                    tool_schemas,
+                )
+                run_tool_loop(provider, tool_registry, verbose=config.verbose)
+            except KeyboardInterrupt:
+                self.console.print("\nRun interrupted.")
+            except Exception as exc:
+                self.console.print(f"[red]Agent run failed: {exc}[/red]")
 
     def _select_provider(self) -> ProviderDefinition | None:
         """Display registered providers and return the selected definition."""
@@ -364,6 +377,6 @@ class InteractiveCLI:
 def main() -> None:
     """Run the interactive agent CLI."""
     try:
-        InteractiveCLI().run()
+        InteractiveCLI(tracer=configure_tracing()).run()
     except KeyboardInterrupt:
         Console().print("\nGoodbye.")

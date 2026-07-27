@@ -136,6 +136,45 @@ listing still requires the selected provider's credential and network access.
 OpenAI currently uses `OPENAI_API_KEY`. Model lists are fetched fresh and are not
 cached between runs; configurations are not saved.
 
+## Observability: Phase 1, Step 1
+
+Each installed entry point now configures OpenTelemetry and creates one root
+`agent_run` span around an actual agent run. The span contains only low-cardinality
+run metadata:
+
+- `agent.model`
+- `agent.tool_chains`
+- `agent.max_turns`
+
+Tracing is inert until an entry point calls `configure_tracing()`. Importing the
+package or constructing `InteractiveCLI` directly in a test uses OpenTelemetry's
+non-recording default tracer, so no collector, backend, or new environment
+variable is required.
+
+Run any agent command normally:
+
+```sh
+uv run incident_agent
+```
+
+When the run finishes, `ConsoleSpanExporter` prints the root span as JSON. Use
+that object to identify the six pieces introduced in this step:
+
+| Piece | Where to see it |
+| --- | --- |
+| Tracer provider | `configure_tracing()` creates the SDK object that owns tracing configuration. |
+| Tracer | The value returned by `configure_tracing()` creates the `agent_run` span. |
+| Span | The exported object named `agent_run`; it measures one run's start, end, and metadata. |
+| Resource | `resource.attributes.service.name` identifies the emitting service as `analytics-agent`. |
+| Span processor | `SimpleSpanProcessor` receives each completed span immediately. |
+| Exporter | `ConsoleSpanExporter` turns that span into terminal JSON. |
+
+In the JSON, `context.trace_id` identifies the whole trace and
+`context.span_id` identifies this span within it. `parent_id` is `null` because
+this is the root. `start_time` and `end_time` bound the run, `attributes` hold
+the three values above, and `resource` describes the process that emitted the
+span. There is no Phoenix or OTLP connection yet; those arrive in Phase 2.
+
 ## Tool behavior
 
 The dataframe chain exposes:
@@ -282,6 +321,7 @@ analytics_agent/
 ├── incident_response_main.py # Fixed simulated-incident entry point
 ├── interactive_cli.py        # Interactive terminal configuration
 ├── messages/                 # Canonical message models and OpenAI adapters
+├── observability/            # OpenTelemetry configuration
 ├── providers/                # Provider boundary and OpenAI implementation
 └── tools/
     ├── dataframe/            # CSV catalog, contracts, and dataframe operations

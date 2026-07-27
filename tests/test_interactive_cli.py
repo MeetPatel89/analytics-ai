@@ -2,6 +2,7 @@
 
 import io
 import unittest
+from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 from rich.console import Console
@@ -20,6 +21,8 @@ class InteractiveCLIProviderTests(unittest.TestCase):
         self.list_models = Mock(return_value=["model-a"])
         self.create_provider = Mock(return_value=Mock())
         self.create_generation_model = Mock(return_value=Mock())
+        self.tracer = Mock()
+        self.tracer.start_as_current_span.return_value = nullcontext()
         self.provider = ProviderDefinition(
             name="openai",
             label="OpenAI",
@@ -31,6 +34,7 @@ class InteractiveCLIProviderTests(unittest.TestCase):
         self.cli = InteractiveCLI(
             console=Console(file=self.output, force_terminal=False),
             providers=(self.provider,),
+            tracer=self.tracer,
         )
 
     def test_select_provider_returns_registered_definition(self) -> None:
@@ -154,6 +158,14 @@ class InteractiveCLIProviderTests(unittest.TestCase):
             self.create_provider.return_value,
             tool_registry,
             verbose=False,
+        )
+        self.tracer.start_as_current_span.assert_called_once_with(
+            "agent_run",
+            attributes={
+                "agent.model": "model-a",
+                "agent.tool_chains": ("incident_response",),
+                "agent.max_turns": 10,
+            },
         )
 
     def test_sql_chain_uses_the_same_runtime_composition_path(self) -> None:
