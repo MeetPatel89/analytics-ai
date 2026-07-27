@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import wraps
 
+from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 ToolFunction = Callable[..., str]
 ToolHandler = Callable[..., object]
 ToolOutputFormatter = Callable[[str], str]
+_TRACER = trace.get_tracer(__name__)
 
 
 class ToolInput(BaseModel):
@@ -55,10 +58,21 @@ class ToolRegistry(Mapping[str, ToolFunction]):
 
     def execute(self, name: str, arguments: Mapping[str, object]) -> str:
         """Execute a tool by name and return a model-readable result."""
-        tool = self._tools.get(name)
-        if tool is None:
-            return f"Unknown tool: {name}"
-        return tool(**arguments)
+        with _TRACER.start_as_current_span(
+            "tool.execute",
+            attributes={
+                "tool.name": name,
+                "tool.arguments": json.dumps(
+                    dict(arguments),
+                    sort_keys=True,
+                    default=str,
+                ),
+            },
+        ):
+            tool = self._tools.get(name)
+            if tool is None:
+                return f"Unknown tool: {name}"
+            return tool(**arguments)
 
     def format_output(self, name: str, output: str) -> str:
         """Format a tool result for display without changing the model payload."""

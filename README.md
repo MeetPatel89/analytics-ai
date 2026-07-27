@@ -139,12 +139,13 @@ cached between runs; configurations are not saved.
 ## Observability: Phase 1, Step 1
 
 Each installed entry point now configures OpenTelemetry and creates one root
-`agent_run` span around an actual agent run. The span contains only low-cardinality
-run metadata:
+`agent_run` span around an actual agent run. Every entry point adds:
 
 - `agent.model`
 - `agent.tool_chains`
 - `agent.max_turns`
+
+Interactive runs also add the selected provider plus the system and user prompts.
 
 Tracing is inert until an entry point calls `configure_tracing()`. Importing the
 package or constructing `InteractiveCLI` directly in a test uses OpenTelemetry's
@@ -172,8 +173,53 @@ that object to identify the six pieces introduced in this step:
 In the JSON, `context.trace_id` identifies the whole trace and
 `context.span_id` identifies this span within it. `parent_id` is `null` because
 this is the root. `start_time` and `end_time` bound the run, `attributes` hold
-the three values above, and `resource` describes the process that emitted the
+the run metadata, and `resource` describes the process that emitted the
 span. There is no Phoenix or OTLP connection yet; those arrive in Phase 2.
+
+## Observability: Phase 1, Step 2
+
+The root span now contains a hierarchy of smaller operations:
+
+```text
+agent_run
+├── agent.turn                         # turn 1
+│   ├── llm.generate
+│   └── tool.execute                   # zero or more tool calls
+└── agent.turn                         # turn 2
+    └── llm.generate
+```
+
+Each `with tracer.start_as_current_span(...)` block makes its span current for
+the duration of that block. OpenTelemetry carries that current span through
+normal synchronous Python calls using context-local state. Consequently,
+`OpenAIProvider.generate()` and `ToolRegistry.execute()` become children of the
+active turn without receiving a span or ID argument.
+
+The custom attributes are intentionally small and explicit at this stage:
+
+| Span | Attributes |
+| --- | --- |
+| `agent.turn` | `agent.turn.number`, `agent.turn.max` |
+| `llm.generate` | model, request input/tool counts, response ID/model/output count |
+| `tool.execute` | tool name and JSON-encoded arguments |
+
+Run an entry point again:
+
+```sh
+uv run incident_agent
+```
+
+For every exported object, compare `context.trace_id`, `context.span_id`, and
+`parent_id`. All objects in one run share a trace ID. A child object's
+`parent_id` equals its parent's span ID. Completed child spans are exported
+before their still-running parents, so the console JSON is usually leaf-first;
+the IDs, rather than print order, reconstruct the tree.
+
+This learning configuration records tool arguments, and interactive root spans
+also record prompts. Treat the console output as potentially sensitive and do
+not put credentials or private data in prompts or tool inputs. Content
+redaction and production-safe capture policy are intentionally outside this
+fundamentals step.
 
 ## Tool behavior
 
@@ -309,8 +355,8 @@ uv run ruff format --check .
 The tests cover message normalization, provider history, configuration
 validation, tool composition and validation, dataframe operations, incident
 fixtures, bounded DuckDB queries, SQL restrictions, visualization source
-validation, and loop dispatch. There are no model-quality benchmarks or
-end-to-end live API tests.
+validation, loop dispatch, and the offline OpenTelemetry span hierarchy. There
+are no model-quality benchmarks or end-to-end live API tests.
 
 ## Project structure
 

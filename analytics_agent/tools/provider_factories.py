@@ -28,9 +28,6 @@ def create_openai_tools(
     """Create executable tools and their OpenAI function schemas."""
     registry = create_tool_registry(definitions)
     schemas = [_to_openai_schema(definition) for definition in definitions]
-    print("--------------------------------")
-    print(schemas)
-    print("--------------------------------")
     return registry, schemas
 
 

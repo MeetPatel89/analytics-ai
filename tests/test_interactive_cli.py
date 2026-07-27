@@ -162,9 +162,12 @@ class InteractiveCLIProviderTests(unittest.TestCase):
         self.tracer.start_as_current_span.assert_called_once_with(
             "agent_run",
             attributes={
+                "agent.provider": "OpenAI",
                 "agent.model": "model-a",
                 "agent.tool_chains": ("incident_response",),
                 "agent.max_turns": 10,
+                "agent.system_prompt": "system prompt",
+                "agent.user_prompt": "user task",
             },
         )
 

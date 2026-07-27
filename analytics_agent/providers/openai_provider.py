@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from openai import OpenAI
 from openai.types.responses import Response
+from opentelemetry import trace
 
 from analytics_agent.messages import (
     ChatMessage,
@@ -17,6 +18,8 @@ from analytics_agent.messages import (
 from analytics_agent.providers.base import BaseProvider
 from analytics_agent.providers.generation import StructuredOutputT
 from analytics_agent.tools.provider_factories import OpenAIToolSchema
+
+_TRACER = trace.get_tracer(__name__)
 
 
 def list_available_models(api_key: str) -> list[str]:
@@ -126,11 +129,32 @@ class OpenAIProvider(BaseProvider):
 
     def generate(self) -> Response:
         """Send the current conversation history to OpenAI."""
-        return self._client.responses.create(
-            model=self._model,
-            tools=self._tools,
-            input=self.serialized_history("openai"),
-        )
+        input_items = self.serialized_history("openai")
+        with _TRACER.start_as_current_span(
+            "llm.generate",
+            attributes={
+                "llm.model": self._model,
+                "llm.request.input_item_count": len(input_items),
+                "llm.request.tool_count": len(self._tools or ()),
+            },
+        ) as span:
+            response = self._client.responses.create(
+                model=self._model,
+                tools=self._tools,
+                input=input_items,
+            )
+            output_items = getattr(response, "output", ()) or ()
+            span.set_attribute(
+                "llm.response.output_item_count",
+                len(output_items),
+            )
+            response_id = getattr(response, "id", None)
+            if response_id:
+                span.set_attribute("llm.response.id", response_id)
+            response_model = getattr(response, "model", None)
+            if response_model:
+                span.set_attribute("llm.response.model", response_model)
+            return response
 
 
 def _response_refusal(response: object) -> str | None:

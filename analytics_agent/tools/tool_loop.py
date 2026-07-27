@@ -2,6 +2,8 @@
 
 import json
 
+from opentelemetry import trace
+
 from analytics_agent.messages import (
     FunctionCallMessage,
     from_openai_output_item,
@@ -15,6 +17,7 @@ from analytics_agent.providers.base import (
 from analytics_agent.tools.registry import ToolRegistry
 
 DEFAULT_MAX_TURNS = 10
+_TRACER = trace.get_tracer(__name__)
 
 
 def run_tool_loop(
@@ -25,36 +28,43 @@ def run_tool_loop(
     verbose: bool = False,
 ) -> None:
     """Run model and tool turns until the model returns a final answer."""
-    for _ in range(max_turns):
-        response = provider.generate()
+    for turn_number in range(1, max_turns + 1):
+        with _TRACER.start_as_current_span(
+            "agent.turn",
+            attributes={
+                "agent.turn.number": turn_number,
+                "agent.turn.max": max_turns,
+            },
+        ):
+            response = provider.generate()
 
-        if verbose:
-            print("--------------------------------")
-            print(response.model_dump_json(indent=2))
-            print("--------------------------------")
-
-        function_calls = provider.add_response_output(response)
-        if not function_calls:
             if verbose:
                 print("--------------------------------")
-                print(provider.serialized_history("openai"))
+                print(response.model_dump_json(indent=2))
                 print("--------------------------------")
-            print(f"Final answer: {get_output_text(response)}")
-            return
 
-        for call in function_calls:
-            try:
-                arguments = _tool_arguments(call)
-            except ToolArgumentsError as exc:
-                print(f"Calling tool: {call.name}(<invalid arguments>)")
-                output = str(exc)
-            else:
-                print(f"Calling tool: {call.name}({json.dumps(arguments)})")
-                output = tool_registry.execute(call.name, arguments)
-            displayed_output = tool_registry.format_output(call.name, output)
-            separator = "\n" if "\n" in displayed_output else " "
-            print(f"Tool result:{separator}{displayed_output}")
-            provider.add_tool_output(call.call_id, output)
+            function_calls = provider.add_response_output(response)
+            if not function_calls:
+                if verbose:
+                    print("--------------------------------")
+                    print(provider.serialized_history("openai"))
+                    print("--------------------------------")
+                print(f"Final answer: {get_output_text(response)}")
+                return
+
+            for call in function_calls:
+                try:
+                    arguments = _tool_arguments(call)
+                except ToolArgumentsError as exc:
+                    print(f"Calling tool: {call.name}(<invalid arguments>)")
+                    output = str(exc)
+                else:
+                    print(f"Calling tool: {call.name}({json.dumps(arguments)})")
+                    output = tool_registry.execute(call.name, arguments)
+                displayed_output = tool_registry.format_output(call.name, output)
+                separator = "\n" if "\n" in displayed_output else " "
+                print(f"Tool result:{separator}{displayed_output}")
+                provider.add_tool_output(call.call_id, output)
 
     print("Max turns reached without a final response.")
 
