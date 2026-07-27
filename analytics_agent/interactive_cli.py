@@ -126,9 +126,12 @@ class InteractiveCLI:
         with self.tracer.start_as_current_span(
             "agent_run",
             attributes={
+                "agent.provider": provider_definition.label,
                 "agent.model": config.model,
                 "agent.tool_chains": tuple(chain.value for chain in config.tool_chains),
                 "agent.max_turns": DEFAULT_MAX_TURNS,
+                "agent.system_prompt": config.system_prompt,
+                "agent.user_prompt": config.user_prompt,
             },
         ):
             try:
