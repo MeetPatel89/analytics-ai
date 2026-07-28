@@ -1,13 +1,13 @@
 """Tests for the first phase of OpenTelemetry tracing."""
 
 import json
+import re
 import subprocess
 import sys
 import textwrap
-import unittest
 
 
-class TracingConfigurationTests(unittest.TestCase):
+class TestTracingConfiguration:
     """Verify tracing is inert by default and visible after configuration."""
 
     def test_unconfigured_tracer_does_not_export_spans(self) -> None:
@@ -22,7 +22,7 @@ class TracingConfigurationTests(unittest.TestCase):
             """
         )
 
-        self.assertEqual(completed.stdout, "")
+        assert completed.stdout == ""
 
     def test_configured_tracer_exports_span_json_to_console(self) -> None:
         """The console pipeline should export attributes and resource metadata."""
@@ -44,21 +44,19 @@ class TracingConfigurationTests(unittest.TestCase):
         )
         exported_span = json.loads(completed.stdout)
 
-        self.assertEqual(exported_span["name"], "agent_run")
-        self.assertIsNone(exported_span["parent_id"])
-        self.assertRegex(exported_span["context"]["trace_id"], r"^0x[0-9a-f]{32}$")
-        self.assertRegex(exported_span["context"]["span_id"], r"^0x[0-9a-f]{16}$")
-        self.assertEqual(
-            exported_span["attributes"],
+        assert exported_span["name"] == "agent_run"
+        assert exported_span["parent_id"] is None
+        assert re.search(r"^0x[0-9a-f]{32}$", exported_span["context"]["trace_id"])
+        assert re.search(r"^0x[0-9a-f]{16}$", exported_span["context"]["span_id"])
+        assert exported_span["attributes"] == (
             {
                 "agent.model": "learning-model",
                 "agent.tool_chains": ["incident_response"],
                 "agent.max_turns": 10,
-            },
+            }
         )
-        self.assertEqual(
-            exported_span["resource"]["attributes"]["service.name"],
-            "analytics-agent",
+        assert (
+            exported_span["resource"]["attributes"]["service.name"] == "analytics-agent"
         )
 
     def test_agent_operations_form_one_parent_child_trace(self) -> None:
@@ -156,8 +154,7 @@ class TracingConfigurationTests(unittest.TestCase):
         )
         spans = json.loads(completed.stdout)
 
-        self.assertEqual(
-            [span["name"] for span in spans],
+        assert [span["name"] for span in spans] == (
             [
                 "llm.generate",
                 "tool.execute",
@@ -165,9 +162,9 @@ class TracingConfigurationTests(unittest.TestCase):
                 "llm.generate",
                 "agent.turn",
                 "agent_run",
-            ],
+            ]
         )
-        self.assertEqual(len({span["trace_id"] for span in spans}), 1)
+        assert len({span["trace_id"] for span in spans}) == 1
 
         root = spans[-1]
         turns = [span for span in spans if span["name"] == "agent.turn"]
@@ -178,20 +175,16 @@ class TracingConfigurationTests(unittest.TestCase):
         )
         tool_call = next(span for span in spans if span["name"] == "tool.execute")
 
-        self.assertIsNone(root["parent_id"])
-        self.assertEqual(
-            [turn["parent_id"] for turn in turns],
-            [root["span_id"], root["span_id"]],
-        )
-        self.assertEqual(llm_calls[0]["parent_id"], turns[0]["span_id"])
-        self.assertEqual(tool_call["parent_id"], turns[0]["span_id"])
-        self.assertEqual(llm_calls[1]["parent_id"], turns[1]["span_id"])
-        self.assertEqual(
-            turns[0]["attributes"],
-            {"agent.turn.number": 1, "agent.turn.max": 2},
-        )
-        self.assertEqual(
-            llm_calls[0]["attributes"],
+        assert root["parent_id"] is None
+        assert [turn["parent_id"] for turn in turns] == [
+            root["span_id"],
+            root["span_id"],
+        ]
+        assert llm_calls[0]["parent_id"] == turns[0]["span_id"]
+        assert tool_call["parent_id"] == turns[0]["span_id"]
+        assert llm_calls[1]["parent_id"] == turns[1]["span_id"]
+        assert turns[0]["attributes"] == {"agent.turn.number": 1, "agent.turn.max": 2}
+        assert llm_calls[0]["attributes"] == (
             {
                 "llm.model": "learning-model",
                 "llm.request.input_item_count": 2,
@@ -199,14 +192,13 @@ class TracingConfigurationTests(unittest.TestCase):
                 "llm.response.output_item_count": 1,
                 "llm.response.id": "resp_1",
                 "llm.response.model": "learning-model",
-            },
+            }
         )
-        self.assertEqual(
-            tool_call["attributes"],
+        assert tool_call["attributes"] == (
             {
                 "tool.name": "echo",
                 "tool.arguments": '{"value": "hello"}',
-            },
+            }
         )
 
     def _run_python(self, source: str) -> subprocess.CompletedProcess[str]:

@@ -1,7 +1,6 @@
 """Tests for provider selection in the interactive CLI."""
 
 import io
-import unittest
 from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
@@ -12,10 +11,10 @@ from analytics_agent.interactive_cli import InteractiveCLI
 from analytics_agent.tools import ToolChain
 
 
-class InteractiveCLIProviderTests(unittest.TestCase):
+class TestInteractiveCLIProvider:
     """Verify provider-first model discovery and runtime creation."""
 
-    def setUp(self) -> None:
+    def setup_method(self) -> None:
         """Create an isolated CLI with one fake provider registration."""
         self.output = io.StringIO()
         self.list_models = Mock(return_value=["model-a"])
@@ -45,8 +44,8 @@ class InteractiveCLIProviderTests(unittest.TestCase):
         ):
             selected = self.cli._select_provider()
 
-        self.assertIs(selected, self.provider)
-        self.assertIn("OpenAI", self.output.getvalue())
+        assert selected is self.provider
+        assert "OpenAI" in self.output.getvalue()
 
     def test_select_provider_can_return_to_main_menu(self) -> None:
         """Quitting the provider picker should cancel configuration."""
@@ -56,7 +55,7 @@ class InteractiveCLIProviderTests(unittest.TestCase):
         ):
             selected = self.cli._select_provider()
 
-        self.assertIsNone(selected)
+        assert selected is None
 
     def test_missing_provider_credential_skips_model_discovery(self) -> None:
         """Credentials should be checked only after a provider is selected."""
@@ -67,7 +66,7 @@ class InteractiveCLIProviderTests(unittest.TestCase):
             self.cli._configure_and_run()
 
         self.list_models.assert_not_called()
-        self.assertIn("OPENAI_API_KEY is not configured", self.output.getvalue())
+        assert "OPENAI_API_KEY is not configured" in self.output.getvalue()
 
     def test_selected_provider_discovers_models_with_its_credential(self) -> None:
         """The selected provider should receive its configured API key."""
@@ -89,8 +88,8 @@ class InteractiveCLIProviderTests(unittest.TestCase):
 
         models = self.cli._load_models(self.provider, "test-key")
 
-        self.assertIsNone(models)
-        self.assertIn("discovery failed", self.output.getvalue())
+        assert models is None
+        assert "discovery failed" in self.output.getvalue()
 
     def test_empty_model_catalog_is_displayed_and_cancels_selection(self) -> None:
         """An account with no visible models should not enter the picker."""
@@ -98,11 +97,8 @@ class InteractiveCLIProviderTests(unittest.TestCase):
 
         models = self.cli._load_models(self.provider, "test-key")
 
-        self.assertIsNone(models)
-        self.assertIn(
-            "No OpenAI models are available",
-            self.output.getvalue(),
-        )
+        assert models is None
+        assert "No OpenAI models are available" in self.output.getvalue()
 
     def test_selected_provider_factory_creates_the_runtime(self) -> None:
         """The provider registration should own runtime construction."""
@@ -142,8 +138,8 @@ class InteractiveCLIProviderTests(unittest.TestCase):
             self.cli._configure_and_run()
 
         config = self.create_provider.call_args.args[0]
-        self.assertEqual(config.provider, "openai")
-        self.assertEqual(config.model, "model-a")
+        assert config.provider == "openai"
+        assert config.model == "model-a"
         build_run_tools.assert_called_once_with(
             self.provider,
             config,
@@ -214,7 +210,3 @@ class InteractiveCLIProviderTests(unittest.TestCase):
             config,
             "test-key",
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

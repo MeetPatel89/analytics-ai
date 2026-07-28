@@ -2,10 +2,10 @@
 
 import json
 import tempfile
-import unittest
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from pydantic import Field
 
 from analytics_agent.tools import (
@@ -19,7 +19,7 @@ from analytics_agent.tools import (
 from analytics_agent.tools.registry import ToolDefinition, ToolInput, ToolRegistry
 
 
-class DataframeCatalogTests(unittest.TestCase):
+class TestDataframeCatalog:
     """Verify catalog validation and CSV loading."""
 
     def test_catalog_normalizes_names_and_infers_unique_id(self) -> None:
@@ -31,21 +31,21 @@ class DataframeCatalogTests(unittest.TestCase):
         )
 
         entry = catalog.get("Records")
-        self.assertEqual(entry.description, "Example data")
-        self.assertEqual(entry.id_column, "record_id")
-        self.assertEqual(catalog.names(), ["Records"])
+        assert entry.description == "Example data"
+        assert entry.id_column == "record_id"
+        assert catalog.names() == ["Records"]
 
     def test_catalog_rejects_invalid_specs(self) -> None:
         """Empty, duplicate, and non-dataframe specs should be rejected."""
         dataframe = pd.DataFrame({"value": [1]})
 
-        with self.assertRaisesRegex(ValueError, "non-empty"):
+        with pytest.raises(ValueError, match="non-empty"):
             DataframeCatalog.from_specs([DatasetSpec(" ", dataframe)])
-        with self.assertRaisesRegex(ValueError, "Duplicate dataset name"):
+        with pytest.raises(ValueError, match="Duplicate dataset name"):
             DataframeCatalog.from_specs(
                 [DatasetSpec("Example", dataframe), DatasetSpec("Example", dataframe)]
             )
-        with self.assertRaisesRegex(ValueError, "must be a pandas DataFrame"):
+        with pytest.raises(ValueError, match="must be a pandas DataFrame"):
             DataframeCatalog.from_specs(
                 [DatasetSpec("Invalid", "not a dataframe")]  # type: ignore[arg-type]
             )
@@ -63,29 +63,27 @@ class DataframeCatalogTests(unittest.TestCase):
 
             specs = load_dataset_specs(directory)
 
-        self.assertEqual(
-            [spec.name for spec in specs], ["Hospital Policy", "inventory"]
-        )
-        self.assertIn("patient care policies", specs[0].description)
-        self.assertEqual(specs[1].description, "Dataset loaded from inventory.csv.")
-        self.assertTrue(specs[1].source_path.endswith("inventory.csv"))
+        assert [spec.name for spec in specs] == ["Hospital Policy", "inventory"]
+        assert "patient care policies" in specs[0].description
+        assert specs[1].description == "Dataset loaded from inventory.csv."
+        assert specs[1].source_path.endswith("inventory.csv")
 
     def test_load_dataset_specs_reports_missing_and_unreadable_csvs(self) -> None:
         """CSV discovery and read failures should be translated to clear errors."""
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "No CSV files found"):
+            with pytest.raises(ValueError, match="No CSV files found"):
                 load_dataset_specs(directory)
 
             unreadable_csv = Path(directory) / "broken.csv"
             unreadable_csv.mkdir()
-            with self.assertRaisesRegex(ValueError, "Failed to load"):
+            with pytest.raises(ValueError, match="Failed to load"):
                 load_dataset_specs(directory)
 
 
-class ToolRegistryTests(unittest.TestCase):
+class TestToolRegistry:
     """Verify schema generation and tool execution through the public registry."""
 
-    def setUp(self) -> None:
+    def setup_method(self) -> None:
         """Create a representative in-memory catalog and tool registry."""
         dataframe = pd.DataFrame(
             {
@@ -119,14 +117,14 @@ class ToolRegistryTests(unittest.TestCase):
             "distinct_values",
         ]
 
-        self.assertEqual(list(self.registry), expected_names)
-        self.assertEqual([schema["name"] for schema in self.schemas], expected_names)
-        self.assertTrue(all(schema["type"] == "function" for schema in self.schemas))
-        self.assertTrue(all(schema["strict"] is True for schema in self.schemas))
-        self.assertNotIn("title", json.dumps(self.schemas))
+        assert list(self.registry) == expected_names
+        assert [schema["name"] for schema in self.schemas] == expected_names
+        assert all(schema["type"] == "function" for schema in self.schemas)
+        assert all(schema["strict"] is True for schema in self.schemas)
+        assert "title" not in json.dumps(self.schemas)
         preview_parameters = self.schemas[2]["parameters"]["properties"]
-        self.assertIn("description", preview_parameters["dataset_name"])
-        self.assertIn("description", preview_parameters["limit"])
+        assert "description" in preview_parameters["dataset_name"]
+        assert "description" in preview_parameters["limit"]
 
     def test_catalog_inspection_tools_return_expected_content(self) -> None:
         """List, describe, and preview tools should retain their text contracts."""
@@ -134,11 +132,11 @@ class ToolRegistryTests(unittest.TestCase):
         described = self.registry["describe_dataframe"](dataset_name="Records")
         previewed = self.registry["preview_dataframe"](dataset_name="Records", limit=2)
 
-        self.assertIn("Records: 3 rows x 4 columns", listed)
-        self.assertIn("source=records.csv", listed)
-        self.assertIn("ID column: record_id", described)
-        self.assertIn("Showing first 2 rows.", previewed)
-        self.assertIn("Beta", previewed)
+        assert "Records: 3 rows x 4 columns" in listed
+        assert "source=records.csv" in listed
+        assert "ID column: record_id" in described
+        assert "Showing first 2 rows." in previewed
+        assert "Beta" in previewed
 
     def test_query_tools_search_filter_aggregate_and_count_values(self) -> None:
         """Query tools should execute validated dataframe operations end to end."""
@@ -160,28 +158,28 @@ class ToolRegistryTests(unittest.TestCase):
             dataset_name="Records", column="category"
         )
 
-        self.assertIn("record_id=3", searched)
-        self.assertIn("Matched rows: 2", filtered)
-        self.assertLess(filtered.index("Gamma"), filtered.index("Alpha"))
-        self.assertIn("Rows after filters: 2", aggregated)
-        self.assertIn("40", aggregated)
-        self.assertIn("A", distinct)
-        self.assertIn("2", distinct)
+        assert "record_id=3" in searched
+        assert "Matched rows: 2" in filtered
+        assert filtered.index("Gamma") < filtered.index("Alpha")
+        assert "Rows after filters: 2" in aggregated
+        assert "40" in aggregated
+        assert "A" in distinct
+        assert "2" in distinct
 
     def test_validation_and_execution_errors_are_returned_to_the_model(self) -> None:
         """Invalid arguments and catalog failures should remain readable strings."""
         invalid = self.registry["preview_dataframe"](dataset_name="Records", limit=21)
         failed = self.registry["describe_dataframe"](dataset_name="Missing")
 
-        self.assertIn("Invalid arguments for tool 'preview_dataframe'", invalid)
-        self.assertIn("Tool 'describe_dataframe' failed", failed)
-        self.assertIn("Unknown dataset 'Missing'", failed)
+        assert "Invalid arguments for tool 'preview_dataframe'" in invalid
+        assert "Tool 'describe_dataframe' failed" in failed
+        assert "Unknown dataset 'Missing'" in failed
 
 
-class IncidentResponseToolTests(unittest.TestCase):
+class TestIncidentResponseTool:
     """Verify incident-response composition and shared registry behavior."""
 
-    def setUp(self) -> None:
+    def setup_method(self) -> None:
         """Create incident tools through the public factory."""
         self.registry, self.schemas = create_incident_response_tools()
 
@@ -194,13 +192,11 @@ class IncidentResponseToolTests(unittest.TestCase):
             "escalate_incident",
         ]
 
-        self.assertEqual(list(self.registry), expected_names)
-        self.assertEqual([schema["name"] for schema in self.schemas], expected_names)
-        self.assertTrue(
-            all(
-                schema["parameters"]["additionalProperties"] is False
-                for schema in self.schemas
-            )
+        assert list(self.registry) == expected_names
+        assert [schema["name"] for schema in self.schemas] == expected_names
+        assert all(
+            schema["parameters"]["additionalProperties"] is False
+            for schema in self.schemas
         )
 
     def test_registry_validates_and_executes_incident_tools(self) -> None:
@@ -219,12 +215,10 @@ class IncidentResponseToolTests(unittest.TestCase):
             "restart_service", {"server_id": "db-node-02", "unexpected": True}
         )
 
-        self.assertEqual(health["cpu"], "98%")
-        self.assertEqual(len(logs["logs"]), 2)
-        self.assertIn("Invalid arguments for tool 'restart_service'", invalid)
-        self.assertEqual(
-            self.registry.execute("missing_tool", {}), "Unknown tool: missing_tool"
-        )
+        assert health["cpu"] == "98%"
+        assert len(logs["logs"]) == 2
+        assert "Invalid arguments for tool 'restart_service'" in invalid
+        assert self.registry.execute("missing_tool", {}) == "Unknown tool: missing_tool"
 
     def test_registry_rejects_duplicate_tool_names(self) -> None:
         """Ambiguous dispatch should fail while composing a registry."""
@@ -238,7 +232,7 @@ class IncidentResponseToolTests(unittest.TestCase):
         first = ToolDefinition(duplicate, NoInput)
         second = ToolDefinition(duplicate, NoInput)
 
-        with self.assertRaisesRegex(ValueError, "Duplicate tool name: duplicate"):
+        with pytest.raises(ValueError, match="Duplicate tool name: duplicate"):
             ToolRegistry([first, second])
 
     def test_openai_factory_rejects_non_strict_object_schemas(self) -> None:
@@ -255,7 +249,7 @@ class IncidentResponseToolTests(unittest.TestCase):
             """Use a dynamic mapping."""
             return str(values)
 
-        with self.assertRaisesRegex(ValueError, "additionalProperties to false"):
+        with pytest.raises(ValueError, match="additionalProperties to false"):
             create_openai_tools([ToolDefinition(dynamic_tool, DynamicInput)])
 
     def test_openai_factory_requires_parameter_descriptions(self) -> None:
@@ -270,9 +264,5 @@ class IncidentResponseToolTests(unittest.TestCase):
             """Use an undocumented value."""
             return value
 
-        with self.assertRaisesRegex(ValueError, "must include a description"):
+        with pytest.raises(ValueError, match="must include a description"):
             create_openai_tools([ToolDefinition(undocumented_tool, UndescribedInput)])
-
-
-if __name__ == "__main__":
-    unittest.main()

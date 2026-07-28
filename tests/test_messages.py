@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import unittest
 from types import SimpleNamespace
 
 from analytics_agent.messages import (
@@ -20,16 +19,16 @@ from analytics_agent.messages import (
 from analytics_agent.providers.openai_provider import OpenAIProvider
 
 
-class MessageModelTests(unittest.TestCase):
+class TestMessageModel:
     """Tests for normalized message variants and adapters."""
 
     def test_generate_initial_messages_returns_typed_variants(self) -> None:
         """Initial prompt helpers should return typed canonical messages."""
         messages = generate_initial_messages("system prompt", "user prompt")
 
-        self.assertIsInstance(messages[0], SystemMessage)
-        self.assertEqual(get_message_text(messages[0]), "system prompt")
-        self.assertEqual(get_message_text(messages[1]), "user prompt")
+        assert isinstance(messages[0], SystemMessage)
+        assert get_message_text(messages[0]) == "system prompt"
+        assert get_message_text(messages[1]) == "user prompt"
 
     def test_function_call_preserves_raw_and_parsed_arguments(self) -> None:
         """Function calls should keep both raw and parsed arguments."""
@@ -39,11 +38,8 @@ class MessageModelTests(unittest.TestCase):
             arguments_raw='{"query":"visiting hour","limit":5}',
         )
 
-        self.assertEqual(message.arguments_raw, '{"query":"visiting hour","limit":5}')
-        self.assertEqual(
-            message.arguments_parsed,
-            {"query": "visiting hour", "limit": 5},
-        )
+        assert message.arguments_raw == '{"query":"visiting hour","limit":5}'
+        assert message.arguments_parsed == {"query": "visiting hour", "limit": 5}
 
     def test_function_call_output_serializes_for_openai(self) -> None:
         """Function call outputs should serialize to OpenAI input items."""
@@ -51,13 +47,12 @@ class MessageModelTests(unittest.TestCase):
             function_call_output_message("call_123", "Found one row")
         )
 
-        self.assertEqual(
-            item,
+        assert item == (
             {
                 "type": "function_call_output",
                 "call_id": "call_123",
                 "output": "Found one row",
-            },
+            }
         )
 
     def test_assistant_message_round_trip_preserves_metadata(self) -> None:
@@ -99,15 +94,13 @@ class MessageModelTests(unittest.TestCase):
 
         message = from_openai_output_item(response_item)
 
-        self.assertIsInstance(message, AssistantMessage)
         assert isinstance(message, AssistantMessage)
-        self.assertEqual(message.id, "msg_123")
-        self.assertEqual(message.status, "completed")
-        self.assertEqual(message.phase, "final_answer")
-        self.assertIsInstance(message.content[0], TextPart)
-        self.assertIsInstance(message.content[1], RefusalPart)
-        self.assertEqual(
-            to_openai_input_item(message),
+        assert message.id == "msg_123"
+        assert message.status == "completed"
+        assert message.phase == "final_answer"
+        assert isinstance(message.content[0], TextPart)
+        assert isinstance(message.content[1], RefusalPart)
+        assert to_openai_input_item(message) == (
             {
                 "type": "message",
                 "role": "assistant",
@@ -125,7 +118,7 @@ class MessageModelTests(unittest.TestCase):
                 "id": "msg_123",
                 "status": "completed",
                 "phase": "final_answer",
-            },
+            }
         )
 
     def test_function_call_from_openai_output_captures_identity(self) -> None:
@@ -151,15 +144,15 @@ class MessageModelTests(unittest.TestCase):
 
         message = from_openai_output_item(response_item)
 
-        self.assertEqual(message.call_id, "call_123")
-        self.assertEqual(message.name, "search_rows")
-        self.assertEqual(
-            message.arguments_parsed,
-            {"query": "visiting hour", "dataset_name": "Hospital Policy"},
-        )
+        assert message.call_id == "call_123"
+        assert message.name == "search_rows"
+        assert message.arguments_parsed == {
+            "query": "visiting hour",
+            "dataset_name": "Hospital Policy",
+        }
 
 
-class ProviderHistoryTests(unittest.TestCase):
+class TestProviderHistory:
     """Tests for provider-side canonical history management."""
 
     def test_provider_history_stores_canonical_messages(self) -> None:
@@ -173,17 +166,12 @@ class ProviderHistoryTests(unittest.TestCase):
 
         history = provider.history
 
-        self.assertEqual(len(history), 3)
-        self.assertIsInstance(history[0], SystemMessage)
-        self.assertEqual(
-            provider.serialized_history("openai")[2],
+        assert len(history) == 3
+        assert isinstance(history[0], SystemMessage)
+        assert provider.serialized_history("openai")[2] == (
             {
                 "type": "function_call_output",
                 "call_id": "call_123",
                 "output": "Found one row",
-            },
+            }
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

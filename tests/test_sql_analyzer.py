@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import tempfile
-import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import duckdb
+import pytest
 from pydantic import BaseModel
 
 from analytics_agent.providers.generation import StructuredOutputT
@@ -94,15 +94,18 @@ def _write_sales_parquet(path: Path) -> None:
         connection.close()
 
 
-class SQLAnalyzerToolTests(unittest.TestCase):
+class TestSQLAnalyzerTool:
     """Verify SQL lookup, analysis, and visualization behavior."""
 
-    def setUp(self) -> None:
+    def setup_method(self) -> None:
         """Create a temporary Parquet fixture for each test."""
         self.temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary_directory.cleanup)
         self.data_path = Path(self.temporary_directory.name) / "sales.parquet"
         _write_sales_parquet(self.data_path)
+
+    def teardown_method(self) -> None:
+        """Remove the temporary Parquet fixture."""
+        self.temporary_directory.cleanup()
 
     def _create_tools(
         self,
@@ -123,20 +126,17 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             "analyze_sales_data",
             "generate_visualization",
         ]
-        self.assertEqual(list(registry), expected)
-        self.assertEqual([schema["name"] for schema in schemas], expected)
-        self.assertTrue(all(schema["strict"] is True for schema in schemas))
-        self.assertNotIn("title", json.dumps(schemas))
-        self.assertEqual(
-            schemas[0]["parameters"]["properties"]["prompt"]["description"],
-            "The sales-data question the generated query must answer.",
+        assert list(registry) == expected
+        assert [schema["name"] for schema in schemas] == expected
+        assert all(schema["strict"] is True for schema in schemas)
+        assert "title" not in json.dumps(schemas)
+        assert (
+            schemas[0]["parameters"]["properties"]["prompt"]["description"]
+            == "The sales-data question the generated query must answer."
         )
         nested_schema = schemas[1]["parameters"]["$defs"]["SalesQueryResult"]
-        self.assertIn("returned_row_count", nested_schema["required"])
-        self.assertEqual(
-            nested_schema["properties"]["rows"]["items"]["type"],
-            "array",
-        )
+        assert "returned_row_count" in nested_schema["required"]
+        assert nested_schema["properties"]["rows"]["items"]["type"] == "array"
 
     def test_lookup_executes_aggregation_and_serializes_json_safe_values(self) -> None:
         """Dates and decimals should be normalized in the result envelope."""
@@ -153,12 +153,12 @@ class SQLAnalyzerToolTests(unittest.TestCase):
 
         result = json.loads(registry["lookup_sales_data"](prompt="Daily revenue"))
 
-        self.assertEqual(result["columns"], ["sale_date", "revenue"])
-        self.assertEqual(result["returned_row_count"], 2)
-        self.assertEqual(result["rows"][0][0], "2026-01-01")
-        self.assertEqual(result["rows"][0][1], 0.25)
-        self.assertFalse(result["truncated"])
-        self.assertIn("sale_date", model.structured_prompts[0][0])
+        assert result["columns"] == ["sale_date", "revenue"]
+        assert result["returned_row_count"] == 2
+        assert result["rows"][0][0] == "2026-01-01"
+        assert result["rows"][0][1] == 0.25
+        assert not result["truncated"]
+        assert "sale_date" in model.structured_prompts[0][0]
 
     def test_lookup_caps_rows_and_reports_truncation(self) -> None:
         """Query execution should fetch one extra row to detect truncation."""
@@ -170,15 +170,14 @@ class SQLAnalyzerToolTests(unittest.TestCase):
         result = json.loads(output)
         displayed = registry.format_output("lookup_sales_data", output)
 
-        self.assertEqual(result["returned_row_count"], 50)
-        self.assertEqual(len(result["rows"]), 50)
-        self.assertTrue(result["truncated"])
-        self.assertEqual(result["rows"][-1][0], 49)
-        self.assertIn("shape: (5, 4)", displayed)
-        self.assertIn("│ sale_id", displayed)
-        self.assertIn(
-            "Displayed 5 of 50 returned rows (query result was truncated).",
-            displayed,
+        assert result["returned_row_count"] == 50
+        assert len(result["rows"]) == 50
+        assert result["truncated"]
+        assert result["rows"][-1][0] == 49
+        assert "shape: (5, 4)" in displayed
+        assert "│ sale_id" in displayed
+        assert (
+            "Displayed 5 of 50 returned rows (query result was truncated)." in displayed
         )
 
     def test_lookup_accepts_a_trailing_statement_terminator(self) -> None:
@@ -198,30 +197,32 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             registry["lookup_sales_data"](prompt="Sales totals by region")
         )
 
-        self.assertEqual(result["columns"], ["region", "total_revenue"])
-        self.assertEqual(result["returned_row_count"], 2)
-        self.assertEqual([row[0] for row in result["rows"]], ["east", "west"])
-        self.assertEqual(
-            result["sql"],
-            (
-                "SELECT region, SUM(revenue) AS total_revenue "
-                "FROM sales GROUP BY region ORDER BY region;"
-            ),
+        assert result["columns"] == ["region", "total_revenue"]
+        assert result["returned_row_count"] == 2
+        assert [row[0] for row in result["rows"]] == ["east", "west"]
+        assert result["sql"] == (
+            "SELECT region, SUM(revenue) AS total_revenue "
+            "FROM sales GROUP BY region ORDER BY region;"
         )
 
-    def test_lookup_rejects_malformed_multiple_and_non_select_sql(self) -> None:
-        """Only one parsed SELECT statement may reach execution."""
-        invalid_cases = [
+    @pytest.mark.parametrize(
+        ("sql", "expected_error"),
+        [
             ("SELECT FROM", "malformed"),
             ("SELECT 1; SELECT 2", "exactly one"),
             ("DELETE FROM sales", "SELECT statement"),
-        ]
-        for sql, expected_error in invalid_cases:
-            with self.subTest(sql=sql):
-                _, registry = self._create_tools([{"sql": sql}])
-                result = registry["lookup_sales_data"](prompt="Invalid query")
-                self.assertIn("Tool 'lookup_sales_data' failed", result)
-                self.assertIn(expected_error, result)
+        ],
+    )
+    def test_lookup_rejects_malformed_multiple_and_non_select_sql(
+        self,
+        sql: str,
+        expected_error: str,
+    ) -> None:
+        """Only one parsed SELECT statement may reach execution."""
+        _, registry = self._create_tools([{"sql": sql}])
+        result = registry["lookup_sales_data"](prompt="Invalid query")
+        assert "Tool 'lookup_sales_data' failed" in result
+        assert expected_error in result
 
     def test_lookup_blocks_external_file_access(self) -> None:
         """SELECT table functions must not bypass the local sales table boundary."""
@@ -231,8 +232,8 @@ class SQLAnalyzerToolTests(unittest.TestCase):
 
         result = registry["lookup_sales_data"](prompt="Read another file")
 
-        self.assertIn("Tool 'lookup_sales_data' failed", result)
-        self.assertIn("disabled by configuration", result.lower())
+        assert "Tool 'lookup_sales_data' failed" in result
+        assert "disabled by configuration" in result.lower()
 
     def test_lookup_reports_missing_unreadable_and_model_failures(self) -> None:
         """Expected local and provider failures should become readable tool errors."""
@@ -241,7 +242,7 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             self.data_path.with_name("missing.parquet"),
         )
         missing = missing_registry["lookup_sales_data"](prompt="Sales")
-        self.assertIn("Sales Parquet file was not found", missing)
+        assert "Sales Parquet file was not found" in missing
 
         invalid_path = self.data_path.with_name("invalid.parquet")
         invalid_path.write_text("not parquet", encoding="utf-8")
@@ -250,14 +251,14 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             invalid_path,
         )
         unreadable = invalid_registry["lookup_sales_data"](prompt="Sales")
-        self.assertIn("Unable to load sales Parquet file", unreadable)
+        assert "Unable to load sales Parquet file" in unreadable
 
         failed_registry, _ = create_sql_analyzer_tools(
             FailingGenerationModel(),
             self.data_path,
         )
         failed = failed_registry["lookup_sales_data"](prompt="Sales")
-        self.assertIn("generation model unavailable", failed)
+        assert "generation model unavailable" in failed
 
     def test_analysis_validates_nested_data_and_forwards_the_envelope(self) -> None:
         """Analysis should receive the complete validated lookup result."""
@@ -275,15 +276,15 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             data=data.model_dump(),
         )
 
-        self.assertEqual(result, "East has 30 sales.")
-        self.assertIn("Summarize regional sales", model.text_prompts[0])
-        self.assertIn('"columns": [', model.text_prompts[0])
-        self.assertIn('"east"', model.text_prompts[0])
+        assert result == "East has 30 sales."
+        assert "Summarize regional sales" in model.text_prompts[0]
+        assert '"columns": [' in model.text_prompts[0]
+        assert '"east"' in model.text_prompts[0]
         invalid = registry["analyze_sales_data"](
             prompt="Summarize",
             data={**data.model_dump(), "returned_row_count": 2},
         )
-        self.assertIn("Invalid arguments for tool 'analyze_sales_data'", invalid)
+        assert "Invalid arguments for tool 'analyze_sales_data'" in invalid
 
     def test_visualization_validates_axes_and_python_source(self) -> None:
         """Chart axes must exist and generated source must parse as Python."""
@@ -323,9 +324,9 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             visualization_goal="Plot revenue over time",
         )
 
-        self.assertEqual(result, code)
-        self.assertIn('"chart_type": "line"', model.structured_prompts[1][0])
-        self.assertIn('"2026-01-01"', model.structured_prompts[1][0])
+        assert result == code
+        assert '"chart_type": "line"' in model.structured_prompts[1][0]
+        assert '"2026-01-01"' in model.structured_prompts[1][0]
 
         _, invalid_axis_registry = self._create_tools(
             [
@@ -341,7 +342,7 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             data=data.model_dump(),
             visualization_goal="Plot",
         )
-        self.assertIn("axes are not result columns", invalid_axis)
+        assert "axes are not result columns" in invalid_axis
 
         _, invalid_code_registry = self._create_tools(
             [
@@ -358,10 +359,10 @@ class SQLAnalyzerToolTests(unittest.TestCase):
             data=data.model_dump(),
             visualization_goal="Plot",
         )
-        self.assertIn("invalid Python", invalid_code)
+        assert "invalid Python" in invalid_code
 
 
-class SQLAnalyzerCompositionTests(unittest.TestCase):
+class TestSQLAnalyzerComposition:
     """Verify SQL-chain composition and registry output validation."""
 
     def test_sql_only_and_combined_composition_use_real_sql_tools(self) -> None:
@@ -380,16 +381,15 @@ class SQLAnalyzerCompositionTests(unittest.TestCase):
             dependencies,
         )
 
-        self.assertEqual(
-            list(sql_registry),
+        assert list(sql_registry) == (
             [
                 "lookup_sales_data",
                 "analyze_sales_data",
                 "generate_visualization",
-            ],
+            ]
         )
-        self.assertEqual(len(combined_registry), 7)
-        self.assertIn("get_server_health", combined_registry)
+        assert len(combined_registry) == 7
+        assert "get_server_health" in combined_registry
 
     def test_generation_model_factory_is_only_called_for_sql_composition(self) -> None:
         """Unrelated chains should not eagerly construct a generation model."""
@@ -402,7 +402,7 @@ class SQLAnalyzerCompositionTests(unittest.TestCase):
             (ToolChain.INCIDENT_RESPONSE,),
             dependencies,
         )
-        self.assertIn("get_server_health", registry)
+        assert "get_server_health" in registry
         generation_factory.assert_not_called()
 
         build_tools_for_chains((ToolChain.SQL_ANALYZER,), dependencies)
@@ -429,7 +429,7 @@ class SQLAnalyzerCompositionTests(unittest.TestCase):
             output_model=SalesQueryResult,
         )
         registry = ToolRegistry([definition])
-        self.assertEqual(json.loads(registry["valid_result"]())["rows"], [[1]])
+        assert json.loads(registry["valid_result"]())["rows"] == [[1]]
 
         def invalid_result() -> dict[str, object]:
             return {"sql": "SELECT 1"}
@@ -443,26 +443,26 @@ class SQLAnalyzerCompositionTests(unittest.TestCase):
                 )
             ]
         )
-        self.assertIn(
-            "Tool 'invalid_result' failed",
-            invalid_registry["invalid_result"](),
-        )
+        assert "Tool 'invalid_result' failed" in invalid_registry["invalid_result"]()
 
 
-class OpenAIGenerationModelTests(unittest.TestCase):
+class TestOpenAIGenerationModel:
     """Verify the OpenAI adapter without issuing live requests."""
 
-    def setUp(self) -> None:
+    def setup_method(self) -> None:
         """Create a fake Responses API client."""
         self.responses = Mock()
         self.client = SimpleNamespace(responses=self.responses)
-        patcher = patch(
+        self.openai_patcher = patch(
             "analytics_agent.providers.openai_provider.OpenAI",
             return_value=self.client,
         )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.openai_patcher.start()
         self.model = OpenAIGenerationModel("test-key", "selected-model")
+
+    def teardown_method(self) -> None:
+        """Stop the OpenAI client patch."""
+        self.openai_patcher.stop()
 
     def test_structured_and_text_generation_use_the_selected_model(self) -> None:
         """Both response styles should retain the selected outer model ID."""
@@ -479,8 +479,8 @@ class OpenAIGenerationModelTests(unittest.TestCase):
         structured = self.model.generate_structured("SQL prompt", SalesSQLQuery)
         text = self.model.generate_text("analysis prompt")
 
-        self.assertEqual(structured, parsed)
-        self.assertEqual(text, "analysis")
+        assert structured == parsed
+        assert text == "analysis"
         self.responses.parse.assert_called_once_with(
             model="selected-model",
             input="SQL prompt",
@@ -497,7 +497,7 @@ class OpenAIGenerationModelTests(unittest.TestCase):
             output=[],
             output_parsed=None,
         )
-        with self.assertRaisesRegex(RuntimeError, "no structured output"):
+        with pytest.raises(RuntimeError, match="no structured output"):
             self.model.generate_structured("prompt", SalesSQLQuery)
 
         refusal_content = SimpleNamespace(type="refusal", refusal="not allowed")
@@ -505,16 +505,12 @@ class OpenAIGenerationModelTests(unittest.TestCase):
             output=[SimpleNamespace(content=[refusal_content])],
             output_text="",
         )
-        with self.assertRaisesRegex(RuntimeError, "refused.*not allowed"):
+        with pytest.raises(RuntimeError, match="refused.*not allowed"):
             self.model.generate_text("prompt")
 
         self.responses.parse.return_value = SimpleNamespace(
             output=[],
             output_parsed={"sql": ""},
         )
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             self.model.generate_structured("prompt", SalesSQLQuery)
-
-
-if __name__ == "__main__":
-    unittest.main()

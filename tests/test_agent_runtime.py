@@ -1,9 +1,10 @@
 """Tests for interactive agent runtime composition."""
 
 import importlib
-import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+import pytest
 
 from analytics_agent.agent_runtime import (
     AgentRunConfig,
@@ -25,45 +26,42 @@ from analytics_agent.tools import (
 )
 
 
-class AgentRunConfigTests(unittest.TestCase):
+class TestAgentRunConfig:
     """Verify validation for configurations collected by the interactive CLI."""
 
     def test_config_requires_model_chains_and_prompts(self) -> None:
         """Incomplete configurations should fail before a provider is created."""
-        with self.assertRaisesRegex(ValueError, "model"):
+        with pytest.raises(ValueError, match="model"):
             AgentRunConfig("openai", "", (ToolChain.DATAFRAME,), "system", "task")
-        with self.assertRaisesRegex(ValueError, "tool chain"):
+        with pytest.raises(ValueError, match="tool chain"):
             AgentRunConfig("openai", "model", (), "system", "task")
-        with self.assertRaisesRegex(ValueError, "system prompt"):
+        with pytest.raises(ValueError, match="system prompt"):
             AgentRunConfig("openai", "model", (ToolChain.DATAFRAME,), " ", "task")
-        with self.assertRaisesRegex(ValueError, "user task"):
+        with pytest.raises(ValueError, match="user task"):
             AgentRunConfig("openai", "model", (ToolChain.DATAFRAME,), "system", " ")
 
     def test_defaults_change_with_selected_tool_chains(self) -> None:
         """Generated prompts should mention each selected capability."""
         both = (ToolChain.DATAFRAME, ToolChain.INCIDENT_RESPONSE)
 
-        self.assertIn("data assistant", default_system_prompt(both))
-        self.assertIn("incident-response", default_system_prompt(both))
-        self.assertIn("payment-server-01", default_user_prompt(both))
+        assert "data assistant" in default_system_prompt(both)
+        assert "incident-response" in default_system_prompt(both)
+        assert "payment-server-01" in default_user_prompt(both)
 
     def test_provider_registry_exposes_openai_runtime_metadata(self) -> None:
         """The interactive runtime should discover OpenAI through its registry."""
         providers = available_providers()
 
-        self.assertEqual(len(providers), 1)
-        self.assertEqual(providers[0].name, "openai")
-        self.assertEqual(providers[0].label, "OpenAI")
-        self.assertEqual(providers[0].credential_env_var, "OPENAI_API_KEY")
-        self.assertIs(providers[0].list_models, list_available_models)
-        self.assertIs(providers[0].create_provider, create_openai_provider)
-        self.assertIs(
-            providers[0].create_generation_model,
-            OpenAIGenerationModel,
-        )
+        assert len(providers) == 1
+        assert providers[0].name == "openai"
+        assert providers[0].label == "OpenAI"
+        assert providers[0].credential_env_var == "OPENAI_API_KEY"
+        assert providers[0].list_models is list_available_models
+        assert providers[0].create_provider is create_openai_provider
+        assert providers[0].create_generation_model is OpenAIGenerationModel
 
 
-class ToolChainCompositionTests(unittest.TestCase):
+class TestToolChainComposition:
     """Verify selected chains produce one combined executable tool set."""
 
     def test_importing_dataframe_entry_point_has_no_runtime_side_effects(self) -> None:
@@ -84,24 +82,24 @@ class ToolChainCompositionTests(unittest.TestCase):
             ToolChainDependencies(create_generation_model=Mock()),
         )
 
-        self.assertEqual(len(registry), 11)
-        self.assertEqual(list(registry), [schema["name"] for schema in schemas])
-        self.assertIn("list_dataframes", registry)
-        self.assertIn("get_server_health", registry)
+        assert len(registry) == 11
+        assert list(registry) == [schema["name"] for schema in schemas]
+        assert "list_dataframes" in registry
+        assert "get_server_health" in registry
 
     def test_sql_defaults_describe_the_three_step_workflow(self) -> None:
         """SQL-only prompts should exercise lookup, analysis, and visualization."""
         system = default_system_prompt((ToolChain.SQL_ANALYZER,))
         user = default_user_prompt((ToolChain.SQL_ANALYZER,))
 
-        self.assertIn("lookup_sales_data first", system)
-        self.assertIn("analyze_sales_data", system)
-        self.assertIn("generate_visualization", system)
-        self.assertIn("analyze", user)
-        self.assertIn("visualization", user)
+        assert "lookup_sales_data first" in system
+        assert "analyze_sales_data" in system
+        assert "generate_visualization" in system
+        assert "analyze" in user
+        assert "visualization" in user
 
 
-class RunToolCompositionTests(unittest.TestCase):
+class TestRunToolComposition:
     """Verify provider generation capabilities are bound once at runtime."""
 
     def _definition(self, generation_factory: Mock) -> ProviderDefinition:
@@ -133,7 +131,7 @@ class RunToolCompositionTests(unittest.TestCase):
             "test-key",
         )
 
-        self.assertIn("get_server_health", registry)
+        assert "get_server_health" in registry
         generation_factory.assert_not_called()
 
     def test_sql_chain_binds_the_selected_credential_and_model(self) -> None:
@@ -146,11 +144,11 @@ class RunToolCompositionTests(unittest.TestCase):
             "test-key",
         )
 
-        self.assertIn("lookup_sales_data", registry)
+        assert "lookup_sales_data" in registry
         generation_factory.assert_called_once_with("test-key", "selected-model")
 
 
-class OpenAIModelDiscoveryTests(unittest.TestCase):
+class TestOpenAIModelDiscovery:
     """Verify model discovery is account-scoped and deterministic."""
 
     def test_list_available_models_sorts_and_deduplicates_ids(self) -> None:
@@ -172,13 +170,9 @@ class OpenAIModelDiscoveryTests(unittest.TestCase):
         ):
             models = list_available_models("test-key")
 
-        self.assertEqual(models, ["gpt-4.1", "gpt-4o-mini"])
+        assert models == ["gpt-4.1", "gpt-4o-mini"]
 
     def test_list_available_models_requires_an_api_key(self) -> None:
         """Discovery should fail before issuing a request without credentials."""
-        with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
             list_available_models("")
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -2,7 +2,6 @@
 
 import contextlib
 import io
-import unittest
 from types import SimpleNamespace
 
 import pandas as pd
@@ -51,7 +50,7 @@ class FakeProvider:
         return []
 
 
-class ToolLoopTests(unittest.TestCase):
+class TestToolLoop:
     """Verify tool dispatch independently of the OpenAI network client."""
 
     def test_incident_tool_call_is_executed_and_returned(self) -> None:
@@ -69,12 +68,12 @@ class ToolLoopTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             run_tool_loop(provider, registry, max_turns=2)
 
-        self.assertEqual(provider.turn, 2)
-        self.assertEqual(provider.tool_outputs[0][0], "call_health")
-        self.assertIn('"cpu": "98%"', provider.tool_outputs[0][1])
-        self.assertIn("Calling tool: get_server_health", output.getvalue())
-        self.assertIn("Tool result:", output.getvalue())
-        self.assertIn("Final answer: None", output.getvalue())
+        assert provider.turn == 2
+        assert provider.tool_outputs[0][0] == "call_health"
+        assert '"cpu": "98%"' in provider.tool_outputs[0][1]
+        assert "Calling tool: get_server_health" in output.getvalue()
+        assert "Tool result:" in output.getvalue()
+        assert "Final answer: None" in output.getvalue()
 
     def test_dataframe_tool_call_is_executed_and_returned(self) -> None:
         """The shared loop should also route dataframe calls through their registry."""
@@ -93,9 +92,9 @@ class ToolLoopTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             run_tool_loop(provider, registry, max_turns=2)
 
-        self.assertEqual(provider.turn, 2)
-        self.assertEqual(provider.tool_outputs[0][0], "call_list_dataframes")
-        self.assertIn("Records: 2 rows x 1 columns", provider.tool_outputs[0][1])
+        assert provider.turn == 2
+        assert provider.tool_outputs[0][0] == "call_list_dataframes"
+        assert "Records: 2 rows x 1 columns" in provider.tool_outputs[0][1]
 
     def test_display_formatter_does_not_change_the_provider_tool_output(self) -> None:
         """Console-friendly output should remain separate from model payloads."""
@@ -128,11 +127,8 @@ class ToolLoopTests(unittest.TestCase):
         with contextlib.redirect_stdout(console):
             run_tool_loop(provider, registry, max_turns=2)
 
-        self.assertEqual(provider.tool_outputs[0][1], '{"rows":[[1],[2]]}')
-        self.assertIn(
-            'Tool result:\nformatted table\n{"rows":[[1],[2]]}',
-            console.getvalue(),
-        )
+        assert provider.tool_outputs[0][1] == '{"rows":[[1],[2]]}'
+        assert 'Tool result:\nformatted table\n{"rows":[[1],[2]]}' in console.getvalue()
 
     def test_verbose_output_includes_provider_diagnostics(self) -> None:
         """Verbose runs should retain the raw provider diagnostics."""
@@ -149,7 +145,7 @@ class ToolLoopTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             run_tool_loop(provider, registry, max_turns=2, verbose=True)
 
-        self.assertIn('"turn": 1', output.getvalue())
+        assert '"turn": 1' in output.getvalue()
 
     def test_invalid_tool_arguments_are_returned_to_the_provider(self) -> None:
         """Malformed provider arguments should not terminate the agent loop."""
@@ -165,10 +161,6 @@ class ToolLoopTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             run_tool_loop(provider, registry, max_turns=2)
 
-        self.assertEqual(provider.turn, 2)
-        self.assertEqual(provider.tool_outputs[0][0], "call_health")
-        self.assertIn("arguments must be valid JSON", provider.tool_outputs[0][1])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert provider.turn == 2
+        assert provider.tool_outputs[0][0] == "call_health"
+        assert "arguments must be valid JSON" in provider.tool_outputs[0][1]

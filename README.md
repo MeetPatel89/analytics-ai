@@ -33,7 +33,7 @@ Prerequisites:
 From the repository root, install the application and development dependencies:
 
 ```sh
-uv sync
+uv sync --extra dev
 ```
 
 Create a local `.env` file:
@@ -342,7 +342,7 @@ The unit suite uses in-memory data and test doubles; it does not make live OpenA
 requests:
 
 ```sh
-uv run python -m unittest discover -s tests
+uv run pytest
 ```
 
 Run lint and formatting checks with:
