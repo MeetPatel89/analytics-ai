@@ -1,4 +1,4 @@
-"""Tests for provider selection in the interactive CLI."""
+"""Tests for provider selection in the interactive filesystem analytics CLI."""
 
 import io
 from contextlib import nullcontext
@@ -8,7 +8,6 @@ from rich.console import Console
 
 from analytics_agent.agent_runtime import ProviderDefinition
 from analytics_agent.interactive_cli import InteractiveCLI
-from analytics_agent.tools import ToolChain
 
 
 class TestInteractiveCLIProvider:
@@ -19,7 +18,6 @@ class TestInteractiveCLIProvider:
         self.output = io.StringIO()
         self.list_models = Mock(return_value=["model-a"])
         self.create_provider = Mock(return_value=Mock())
-        self.create_generation_model = Mock(return_value=Mock())
         self.tracer = Mock()
         self.tracer.start_as_current_span.return_value = nullcontext()
         self.provider = ProviderDefinition(
@@ -28,7 +26,6 @@ class TestInteractiveCLIProvider:
             credential_env_var="OPENAI_API_KEY",
             list_models=self.list_models,
             create_provider=self.create_provider,
-            create_generation_model=self.create_generation_model,
         )
         self.cli = InteractiveCLI(
             console=Console(file=self.output, force_terminal=False),
@@ -100,8 +97,8 @@ class TestInteractiveCLIProvider:
         assert models is None
         assert "No OpenAI models are available" in self.output.getvalue()
 
-    def test_selected_provider_factory_creates_the_runtime(self) -> None:
-        """The provider registration should own runtime construction."""
+    def test_selected_provider_factory_creates_the_filesystem_runtime(self) -> None:
+        """Every run should use the single filesystem analytics composition path."""
         tool_registry = Mock()
         tool_schemas = [{"type": "function"}]
         with (
@@ -111,11 +108,6 @@ class TestInteractiveCLIProvider:
                 return_value="test-key",
             ),
             patch.object(self.cli, "_select_model", return_value="model-a"),
-            patch.object(
-                self.cli,
-                "_select_tool_chains",
-                return_value=(ToolChain.INCIDENT_RESPONSE,),
-            ),
             patch.object(
                 self.cli,
                 "_select_system_prompt",
@@ -140,11 +132,7 @@ class TestInteractiveCLIProvider:
         config = self.create_provider.call_args.args[0]
         assert config.provider == "openai"
         assert config.model == "model-a"
-        build_run_tools.assert_called_once_with(
-            self.provider,
-            config,
-            "test-key",
-        )
+        build_run_tools.assert_called_once_with(config)
         self.create_provider.assert_called_once_with(
             config,
             "test-key",
@@ -160,53 +148,19 @@ class TestInteractiveCLIProvider:
             attributes={
                 "agent.provider": "OpenAI",
                 "agent.model": "model-a",
-                "agent.tool_chains": ("incident_response",),
+                "agent.tool_set": "filesystem_analytics",
                 "agent.max_turns": 10,
                 "agent.system_prompt": "system prompt",
                 "agent.user_prompt": "user task",
             },
         )
 
-    def test_filesystem_chain_uses_the_same_runtime_composition_path(self) -> None:
-        """The CLI should use the shared composition path for filesystem tools."""
-        tool_registry = Mock()
-        tool_schemas = [{"type": "function"}]
-        with (
-            patch.object(self.cli, "_select_provider", return_value=self.provider),
-            patch(
-                "analytics_agent.interactive_cli.os.getenv",
-                return_value="test-key",
-            ),
-            patch.object(self.cli, "_select_model", return_value="model-a"),
-            patch.object(
-                self.cli,
-                "_select_tool_chains",
-                return_value=(ToolChain.FILESYSTEM_ANALYTICS,),
-            ),
-            patch.object(
-                self.cli,
-                "_select_system_prompt",
-                return_value="system prompt",
-            ),
-            patch(
-                "analytics_agent.interactive_cli.Prompt.ask",
-                return_value="user task",
-            ),
-            patch(
-                "analytics_agent.interactive_cli.Confirm.ask",
-                side_effect=[False, True],
-            ),
-            patch(
-                "analytics_agent.interactive_cli.build_run_tools",
-                return_value=(tool_registry, tool_schemas),
-            ) as build_run_tools,
-            patch("analytics_agent.interactive_cli.run_tool_loop"),
-        ):
-            self.cli._configure_and_run()
+    def test_configuration_view_lists_filesystem_tools(self) -> None:
+        """The capabilities screen should contain only filesystem analytics."""
+        with patch("analytics_agent.interactive_cli.os.getenv", return_value=""):
+            self.cli._show_available_configuration()
 
-        config = self.create_provider.call_args.args[0]
-        build_run_tools.assert_called_once_with(
-            self.provider,
-            config,
-            "test-key",
-        )
+        output = self.output.getvalue()
+        assert "Filesystem analytics" in output
+        assert "list_locations" in output
+        assert "query_data" in output

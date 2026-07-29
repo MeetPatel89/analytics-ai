@@ -1,4 +1,4 @@
-"""Public interface for the filesystem analytics tool chain."""
+"""Public interface for the filesystem analytics tool set."""
 
 from analytics_agent.tools.filesystem_analytics.models import (
     MAX_DIRECTORY_ENTRIES,
@@ -22,6 +22,7 @@ from analytics_agent.tools.filesystem_analytics.query import (
     validate_select_sql,
 )
 from analytics_agent.tools.filesystem_analytics.registry import (
+    FILESYSTEM_ANALYTICS_TOOL_NAMES,
     build_filesystem_definitions,
     create_filesystem_analytics_tools,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "MAX_TEXT_BYTES",
     "MAX_TOOL_OUTPUT_BYTES",
     "DuckDBQueryEngine",
+    "FILESYSTEM_ANALYTICS_TOOL_NAMES",
     "FilesystemAnalyticsTools",
     "GetFileInfoInput",
     "InspectSchemaInput",

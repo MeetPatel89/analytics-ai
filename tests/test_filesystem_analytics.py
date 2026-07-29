@@ -12,9 +12,7 @@ from fsspec.implementations.memory import MemoryFileSystem
 
 from analytics_agent.filesystem import DataLocation, LocationCatalog
 from analytics_agent.tools import (
-    ToolChain,
-    ToolChainDependencies,
-    build_tools_for_chains,
+    FILESYSTEM_ANALYTICS_TOOL_NAMES,
     create_filesystem_analytics_tools,
 )
 from analytics_agent.tools.filesystem_analytics import MAX_TOOL_OUTPUT_BYTES
@@ -61,15 +59,7 @@ class TestFilesystemAnalyticsTools:
 
     def test_factory_registers_all_strict_tools(self) -> None:
         """Tool names and OpenAI schemas should remain in lockstep."""
-        expected = [
-            "list_locations",
-            "list_directory",
-            "get_file_info",
-            "inspect_schema",
-            "preview_data",
-            "read_text_file",
-            "query_data",
-        ]
+        expected = list(FILESYSTEM_ANALYTICS_TOOL_NAMES)
 
         assert list(self.registry) == expected
         assert [schema["name"] for schema in self.schemas] == expected
@@ -244,30 +234,15 @@ class TestFilesystemAnalyticsTools:
 
 
 class TestFilesystemComposition:
-    """Verify the new chain is registered without provider-only dependencies."""
+    """Verify filesystem tools compose without unrelated dependencies."""
 
-    def test_filesystem_chain_composes_alone_and_with_incident_tools(self) -> None:
-        """Selected chains should preserve definition order and schemas."""
+    def test_filesystem_tool_names_match_registry_and_schemas(self) -> None:
+        """Public metadata, handlers, and schemas should preserve one order."""
         catalog = _memory_catalog()
-        dependencies = ToolChainDependencies(location_catalog=catalog)
-
-        registry, schemas = build_tools_for_chains(
-            (ToolChain.FILESYSTEM_ANALYTICS,),
-            dependencies,
-        )
-        combined, _ = build_tools_for_chains(
-            (
-                ToolChain.FILESYSTEM_ANALYTICS,
-                ToolChain.INCIDENT_RESPONSE,
-            ),
-            dependencies,
-        )
+        registry, schemas = create_filesystem_analytics_tools(catalog)
 
         assert list(registry) == [schema["name"] for schema in schemas]
-        assert len(registry) == 7
-        assert len(combined) == 11
-        assert "query_data" in combined
-        assert "get_server_health" in combined
+        assert tuple(registry) == FILESYSTEM_ANALYTICS_TOOL_NAMES
 
     def test_local_filesystem_query_uses_the_same_engine(self) -> None:
         """Local files should be queryable through the same catalog abstraction."""

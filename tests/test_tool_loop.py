@@ -13,9 +13,23 @@ from analytics_agent.tools import (
     ToolInput,
     ToolRegistry,
     create_filesystem_analytics_tools,
-    create_incident_response_tools,
     run_tool_loop,
 )
+
+
+class EchoInput(ToolInput):
+    """Input for a deterministic test-only tool."""
+
+    value: str
+
+
+def echo(value: str) -> str:
+    """Return the supplied value."""
+    return value
+
+
+def _echo_registry() -> ToolRegistry:
+    return ToolRegistry([ToolDefinition(echo, EchoInput)])
 
 
 class FakeProvider:
@@ -35,7 +49,7 @@ class FakeProvider:
         )
 
     def add_response_output(self, response: object) -> list[FunctionCallMessage]:
-        """Request the health tool on the first turn only."""
+        """Request the configured tool on the first turn only."""
         del response
         return [self.call] if self.turn == 1 else []
 
@@ -52,25 +66,24 @@ class FakeProvider:
 class TestToolLoop:
     """Verify tool dispatch independently of the OpenAI network client."""
 
-    def test_incident_tool_call_is_executed_and_returned(self) -> None:
-        """The shared loop should route incident calls through their registry."""
+    def test_tool_call_is_executed_and_returned(self) -> None:
+        """The shared loop should execute a registered provider request."""
         provider = FakeProvider(
             function_call_message(
-                call_id="call_health",
-                name="get_server_health",
-                arguments_raw='{"server_id":"payment-server-01"}',
+                call_id="call_echo",
+                name="echo",
+                arguments_raw='{"value":"hello"}',
             )
         )
-        registry, _ = create_incident_response_tools()
+        registry = _echo_registry()
 
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             run_tool_loop(provider, registry, max_turns=2)
 
         assert provider.turn == 2
-        assert provider.tool_outputs[0][0] == "call_health"
-        assert '"cpu": "98%"' in provider.tool_outputs[0][1]
-        assert "Calling tool: get_server_health" in output.getvalue()
+        assert provider.tool_outputs[0] == ("call_echo", "hello")
+        assert "Calling tool: echo" in output.getvalue()
         assert "Tool result:" in output.getvalue()
         assert "Final answer: None" in output.getvalue()
 
@@ -133,12 +146,12 @@ class TestToolLoop:
         """Verbose runs should retain the raw provider diagnostics."""
         provider = FakeProvider(
             function_call_message(
-                call_id="call_health",
-                name="get_server_health",
-                arguments_raw='{"server_id":"payment-server-01"}',
+                call_id="call_echo",
+                name="echo",
+                arguments_raw='{"value":"hello"}',
             )
         )
-        registry, _ = create_incident_response_tools()
+        registry = _echo_registry()
         output = io.StringIO()
 
         with contextlib.redirect_stdout(output):
@@ -150,16 +163,16 @@ class TestToolLoop:
         """Malformed provider arguments should not terminate the agent loop."""
         provider = FakeProvider(
             function_call_message(
-                call_id="call_health",
-                name="get_server_health",
+                call_id="call_echo",
+                name="echo",
                 arguments_raw="{invalid-json",
             )
         )
-        registry, _ = create_incident_response_tools()
+        registry = _echo_registry()
 
         with contextlib.redirect_stdout(io.StringIO()):
             run_tool_loop(provider, registry, max_turns=2)
 
         assert provider.turn == 2
-        assert provider.tool_outputs[0][0] == "call_health"
+        assert provider.tool_outputs[0][0] == "call_echo"
         assert "arguments must be valid JSON" in provider.tool_outputs[0][1]

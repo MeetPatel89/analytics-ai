@@ -6,26 +6,35 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from analytics_agent.filesystem import load_location_catalog
 from analytics_agent.messages import generate_initial_messages
 from analytics_agent.providers.base import (
     Provider,
     ToolLoopProvider,
     ToolLoopResponse,
 )
-from analytics_agent.providers.generation import GenerationModel
 from analytics_agent.providers.openai_provider import (
-    OpenAIGenerationModel,
     OpenAIProvider,
 )
 from analytics_agent.providers.openai_provider import (
     list_available_models as list_openai_models,
 )
+from analytics_agent.tools.filesystem_analytics import (
+    create_filesystem_analytics_tools,
+)
 from analytics_agent.tools.provider_factories import OpenAIToolSchema
 from analytics_agent.tools.registry import ToolRegistry
-from analytics_agent.tools.tool_chains import (
-    ToolChain,
-    ToolChainDependencies,
-    build_tools_for_chains,
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a filesystem analytics assistant with read-only access to configured "
+    "data locations. Start by discovering locations and files, inspect schemas "
+    "before querying unfamiliar data, and ground every factual answer in tool "
+    "results. Use relative paths only. Use query_data for bounded SELECT-only "
+    "analytics over CSV or Parquet source aliases."
+)
+DEFAULT_USER_PROMPT = (
+    "List the available data locations, find tabular files, and summarize one "
+    "useful result from the available data."
 )
 
 
@@ -35,7 +44,6 @@ class AgentRunConfig:
 
     provider: Provider
     model: str
-    tool_chains: tuple[ToolChain, ...]
     system_prompt: str
     user_prompt: str
     verbose: bool = False
@@ -45,8 +53,6 @@ class AgentRunConfig:
         """Reject incomplete run configurations before provider construction."""
         if not self.model.strip():
             raise ValueError("A model must be selected.")
-        if not self.tool_chains:
-            raise ValueError("At least one tool chain must be selected.")
         if not self.system_prompt.strip():
             raise ValueError("A system prompt is required.")
         if not self.user_prompt.strip():
@@ -69,7 +75,6 @@ class ProviderDefinition:
     credential_env_var: str
     list_models: ModelLister
     create_provider: ProviderFactory
-    create_generation_model: Callable[[str, str], GenerationModel]
 
 
 def create_openai_provider(
@@ -87,19 +92,13 @@ def create_openai_provider(
 
 
 def build_run_tools(
-    definition: ProviderDefinition,
     config: AgentRunConfig,
-    api_key: str,
 ) -> tuple[ToolRegistry, list[OpenAIToolSchema]]:
-    """Compose run tools with provider capabilities bound lazily."""
-    dependencies = ToolChainDependencies(
-        create_generation_model=lambda: definition.create_generation_model(
-            api_key,
-            config.model,
-        ),
+    """Build the filesystem analytics tools for one agent run."""
+    catalog = load_location_catalog(
         data_path=config.data_path,
     )
-    return build_tools_for_chains(config.tool_chains, dependencies)
+    return create_filesystem_analytics_tools(catalog)
 
 
 def available_providers() -> tuple[ProviderDefinition, ...]:
@@ -111,6 +110,5 @@ def available_providers() -> tuple[ProviderDefinition, ...]:
             credential_env_var="OPENAI_API_KEY",
             list_models=list_openai_models,
             create_provider=create_openai_provider,
-            create_generation_model=OpenAIGenerationModel,
         ),
     )

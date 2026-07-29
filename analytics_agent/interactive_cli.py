@@ -15,6 +15,8 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from analytics_agent.agent_runtime import (
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_USER_PROMPT,
     AgentRunConfig,
     ProviderDefinition,
     available_providers,
@@ -22,10 +24,7 @@ from analytics_agent.agent_runtime import (
 )
 from analytics_agent.observability import configure_tracing, get_tracer
 from analytics_agent.tools import (
-    ToolChain,
-    available_tool_chains,
-    default_system_prompt,
-    default_user_prompt,
+    FILESYSTEM_ANALYTICS_TOOL_NAMES,
     run_tool_loop,
 )
 from analytics_agent.tools.tool_loop import DEFAULT_MAX_TURNS
@@ -56,7 +55,7 @@ class InteractiveCLI:
             self.console.print(
                 Panel(
                     "[1] Configure and run an agent\n"
-                    "[2] View available providers, models, and tool chains\n"
+                    "[2] View available providers, models, and analytics tools\n"
                     "[3] Exit",
                     title="Main menu",
                 )
@@ -95,11 +94,10 @@ class InteractiveCLI:
         if model is None:
             return
 
-        tool_chains = self._select_tool_chains()
-        system_prompt = self._select_system_prompt(tool_chains)
+        system_prompt = self._select_system_prompt()
         user_prompt = Prompt.ask(
             "Task for the agent",
-            default=default_user_prompt(tool_chains),
+            default=DEFAULT_USER_PROMPT,
             console=self.console,
         ).strip()
         verbose = Confirm.ask(
@@ -112,7 +110,6 @@ class InteractiveCLI:
             config = AgentRunConfig(
                 provider=provider_definition.name,
                 model=model,
-                tool_chains=tool_chains,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 verbose=verbose,
@@ -134,18 +131,14 @@ class InteractiveCLI:
             attributes={
                 "agent.provider": provider_definition.label,
                 "agent.model": config.model,
-                "agent.tool_chains": tuple(chain.value for chain in config.tool_chains),
+                "agent.tool_set": "filesystem_analytics",
                 "agent.max_turns": DEFAULT_MAX_TURNS,
                 "agent.system_prompt": config.system_prompt,
                 "agent.user_prompt": config.user_prompt,
             },
         ):
             try:
-                tool_registry, tool_schemas = build_run_tools(
-                    provider_definition,
-                    config,
-                    api_key,
-                )
+                tool_registry, tool_schemas = build_run_tools(config)
                 provider = provider_definition.create_provider(
                     config,
                     api_key,
@@ -264,42 +257,11 @@ class InteractiveCLI:
                 "[yellow]Choose a listed number or a valid command.[/yellow]"
             )
 
-    def _select_tool_chains(self) -> tuple[ToolChain, ...]:
-        """Prompt until the user selects one or more registered tool chains."""
-        choices = available_tool_chains()
-        table = Table(title="Tool chains")
-        table.add_column("#", justify="right")
-        table.add_column("Tool chain")
-        table.add_column("Description")
-        for index, option in enumerate(choices, start=1):
-            table.add_row(str(index), option.label, option.description)
-        self.console.print(table)
-
-        while True:
-            raw_selection = Prompt.ask(
-                "Select one or more tool chains (for example: 1 or 1,2)",
-                default="1",
-                console=self.console,
-            )
-            try:
-                indexes = [int(value.strip()) for value in raw_selection.split(",")]
-                if not indexes or any(
-                    index not in range(1, len(choices) + 1) for index in indexes
-                ):
-                    raise ValueError
-            except ValueError:
-                self.console.print(
-                    "[yellow]Enter one or more valid comma-separated numbers.[/yellow]"
-                )
-                continue
-            return tuple(dict.fromkeys(choices[index - 1].chain for index in indexes))
-
-    def _select_system_prompt(self, tool_chains: tuple[ToolChain, ...]) -> str:
+    def _select_system_prompt(self) -> str:
         """Accept a generated system prompt or collect a multiline replacement."""
-        default_prompt = default_system_prompt(tool_chains)
-        self.console.print(Panel(default_prompt, title="Default system prompt"))
+        self.console.print(Panel(DEFAULT_SYSTEM_PROMPT, title="Default system prompt"))
         if Confirm.ask("Use this system prompt?", default=True, console=self.console):
-            return default_prompt
+            return DEFAULT_SYSTEM_PROMPT
 
         self.console.print(
             "Enter a system prompt. Finish with a line containing only '.'."
@@ -333,11 +295,13 @@ class InteractiveCLI:
             )
         self.console.print(provider_table)
 
-        table = Table(title="Registered tool chains")
-        table.add_column("Tool chain")
+        table = Table(title="Filesystem analytics")
+        table.add_column("Tool set")
         table.add_column("Tools")
-        for option in available_tool_chains():
-            table.add_row(option.label, ", ".join(option.tool_names))
+        table.add_row(
+            "Filesystem analytics",
+            ", ".join(FILESYSTEM_ANALYTICS_TOOL_NAMES),
+        )
         self.console.print(table)
 
         for provider, api_key in provider_credentials:
@@ -364,14 +328,13 @@ class InteractiveCLI:
         provider_label: str,
     ) -> None:
         """Display the selected values before requiring execution confirmation."""
-        chains = ", ".join(chain.replace("_", " ") for chain in config.tool_chains)
         self.console.print(
             Panel(
                 "\n".join(
                     [
                         f"Provider: {provider_label}",
                         f"Model: {config.model}",
-                        f"Tool chains: {chains}",
+                        "Tool set: filesystem analytics",
                         f"Verbose diagnostics: {'yes' if config.verbose else 'no'}",
                         f"Task: {config.user_prompt}",
                         "System prompt:",

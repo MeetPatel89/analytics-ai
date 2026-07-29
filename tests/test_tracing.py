@@ -35,7 +35,7 @@ class TestTracingConfiguration:
                 "agent_run",
                 attributes={
                     "agent.model": "learning-model",
-                    "agent.tool_chains": ("incident_response",),
+                    "agent.tool_set": "filesystem_analytics",
                     "agent.max_turns": 10,
                 },
             ):
@@ -51,7 +51,7 @@ class TestTracingConfiguration:
         assert exported_span["attributes"] == (
             {
                 "agent.model": "learning-model",
-                "agent.tool_chains": ["incident_response"],
+                "agent.tool_set": "filesystem_analytics",
                 "agent.max_turns": 10,
             }
         )

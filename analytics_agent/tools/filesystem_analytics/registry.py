@@ -17,6 +17,16 @@ from analytics_agent.tools.provider_factories import (
 )
 from analytics_agent.tools.registry import ToolDefinition, ToolRegistry
 
+FILESYSTEM_ANALYTICS_TOOL_NAMES = (
+    "list_locations",
+    "list_directory",
+    "get_file_info",
+    "inspect_schema",
+    "preview_data",
+    "read_text_file",
+    "query_data",
+)
+
 
 def build_filesystem_definitions(
     catalog: LocationCatalog,

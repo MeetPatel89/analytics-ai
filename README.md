@@ -5,7 +5,7 @@ navigate, inspect, and query data in named filesystem roots. Phase 1 supports lo
 filesystems and Azure Data Lake Storage Gen2 (ADLS Gen2) through one read-only
 `fsspec` abstraction.
 
-The analytics chain can:
+The agent can:
 
 - Discover configured locations and browse directories or globs.
 - Inspect metadata and CSV or Parquet schemas.
@@ -13,9 +13,6 @@ The analytics chain can:
 - Read bounded ranges from txt, log, and JSON files.
 - Run single-statement DuckDB `SELECT` queries over one or more CSV or Parquet
   files/globs, returning at most 50 rows.
-
-The existing deterministic incident-response chain remains available as a demo.
-The former dataframe and sales SQL-analyzer chains have been retired.
 
 ## Quickstart
 
@@ -46,20 +43,15 @@ cp /path/to/example.parquet data/
 uv run agent
 ```
 
-Select **Filesystem analytics** in the interactive flow. The CLI then lets you
-select an account-available model, edit the generated prompts, inspect the run
-summary, and confirm before the first model request.
+The CLI lets you select an account-available model, edit the generated prompts,
+inspect the run summary, and confirm before the first model request. Every run has
+the same bounded filesystem analytics tools; there is no unrelated tool-set
+selection step.
 
 To use a different local root without creating `locations.toml`, pass:
 
 ```sh
 uv run agent --data-path /srv/analytics
-```
-
-The incident demo does not need data:
-
-```sh
-uv run incident_agent
 ```
 
 ## Named locations
@@ -189,12 +181,10 @@ arguments.
 ```text
 interactive_cli
 └── agent_runtime + shared tool loop
-    ├── filesystem_analytics tool chain
-    │   ├── navigation tools
-    │   ├── Arrow-backed schema and preview tools
-    │   └── guarded DuckDB query tool
-    └── incident_response demo chain
-        └── deterministic in-memory fixtures
+    └── filesystem_analytics tools
+        ├── navigation tools
+        ├── Arrow-backed schema and preview tools
+        └── guarded DuckDB query tool
 
 filesystem_analytics
 └── LocationCatalog
@@ -253,16 +243,13 @@ analytics_agent/
 │   ├── config.py             # locations.toml and zero-config fallback
 │   └── locations.py          # Named roots and containment
 ├── interactive_cli.py
-├── incident_response_main.py
 ├── messages/
 ├── observability/
 ├── providers/
 └── tools/
     ├── filesystem_analytics/ # Navigation, inspection, and DuckDB query tools
-    ├── incident_response/    # Simulated demo operations
     ├── provider_factories.py
     ├── registry.py
-    ├── tool_chains.py
     └── tool_loop.py
 tests/
 ```

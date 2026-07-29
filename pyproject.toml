@@ -1,22 +1,21 @@
 [project]
 name = "analytics-agent"
 version = "0.1.0"
-description = "Read-only analytics agents for local and ADLS filesystems"
+description = "Read-only filesystem analytics agent for local and ADLS data"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "adlfs>=2024.12.0",
     "azure-identity>=1.25.1",
     "duckdb>=1.4.0",
+    "fastapi[standard]>=0.141.1",
     "fsspec>=2024.12.0",
     "openai>=2.45.0",
     "opentelemetry-api>=1.44.0",
     "opentelemetry-sdk>=1.44.0",
-    "pandas>=3.0.3",
     "pyarrow>=25.0.0",
     "python-dotenv>=1.2.2",
     "rich>=14.0.0",
-    "tabulate>=0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +34,6 @@ module-name = "analytics_agent"
 module-root = ""
 
 [project.scripts]
-incident_agent = "analytics_agent.incident_response_main:main"
 agent = "analytics_agent.interactive_cli:main"
 
 [tool.ruff]
