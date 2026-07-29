@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from analytics_agent.messages import generate_initial_messages
 from analytics_agent.providers.base import (
@@ -38,6 +39,7 @@ class AgentRunConfig:
     system_prompt: str
     user_prompt: str
     verbose: bool = False
+    data_path: Path | None = None
 
     def __post_init__(self) -> None:
         """Reject incomplete run configurations before provider construction."""
@@ -94,7 +96,8 @@ def build_run_tools(
         create_generation_model=lambda: definition.create_generation_model(
             api_key,
             config.model,
-        )
+        ),
+        data_path=config.data_path,
     )
     return build_tools_for_chains(config.tool_chains, dependencies)
 

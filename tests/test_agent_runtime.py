@@ -1,6 +1,8 @@
 """Tests for interactive agent runtime composition."""
 
-import importlib
+import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -13,6 +15,7 @@ from analytics_agent.agent_runtime import (
     build_run_tools,
     create_openai_provider,
 )
+from analytics_agent.filesystem import DataLocation, LocationCatalog
 from analytics_agent.providers.openai_provider import (
     OpenAIGenerationModel,
     list_available_models,
@@ -32,21 +35,39 @@ class TestAgentRunConfig:
     def test_config_requires_model_chains_and_prompts(self) -> None:
         """Incomplete configurations should fail before a provider is created."""
         with pytest.raises(ValueError, match="model"):
-            AgentRunConfig("openai", "", (ToolChain.DATAFRAME,), "system", "task")
+            AgentRunConfig(
+                "openai",
+                "",
+                (ToolChain.FILESYSTEM_ANALYTICS,),
+                "system",
+                "task",
+            )
         with pytest.raises(ValueError, match="tool chain"):
             AgentRunConfig("openai", "model", (), "system", "task")
         with pytest.raises(ValueError, match="system prompt"):
-            AgentRunConfig("openai", "model", (ToolChain.DATAFRAME,), " ", "task")
+            AgentRunConfig(
+                "openai",
+                "model",
+                (ToolChain.FILESYSTEM_ANALYTICS,),
+                " ",
+                "task",
+            )
         with pytest.raises(ValueError, match="user task"):
-            AgentRunConfig("openai", "model", (ToolChain.DATAFRAME,), "system", " ")
+            AgentRunConfig(
+                "openai",
+                "model",
+                (ToolChain.FILESYSTEM_ANALYTICS,),
+                "system",
+                " ",
+            )
 
     def test_defaults_change_with_selected_tool_chains(self) -> None:
         """Generated prompts should mention each selected capability."""
-        both = (ToolChain.DATAFRAME, ToolChain.INCIDENT_RESPONSE)
+        both = (ToolChain.FILESYSTEM_ANALYTICS, ToolChain.INCIDENT_RESPONSE)
 
-        assert "data assistant" in default_system_prompt(both)
+        assert "filesystem analytics assistant" in default_system_prompt(both)
         assert "incident-response" in default_system_prompt(both)
-        assert "payment-server-01" in default_user_prompt(both)
+        assert "configured data files" in default_user_prompt(both)
 
     def test_provider_registry_exposes_openai_runtime_metadata(self) -> None:
         """The interactive runtime should discover OpenAI through its registry."""
@@ -64,39 +85,33 @@ class TestAgentRunConfig:
 class TestToolChainComposition:
     """Verify selected chains produce one combined executable tool set."""
 
-    def test_importing_dataframe_entry_point_has_no_runtime_side_effects(self) -> None:
-        """Importing an entry point should not read datasets or credentials."""
-        with patch(
-            "analytics_agent.tools.tool_chains.load_dataset_specs"
-        ) as load_dataset_specs:
-            from analytics_agent import dataframe_main
-
-            importlib.reload(dataframe_main)
-
-        load_dataset_specs.assert_not_called()
-
     def test_combined_chains_include_all_tools_and_schemas(self) -> None:
         """Both chains should preserve order and have matching OpenAI schemas."""
-        registry, schemas = build_tools_for_chains(
-            (ToolChain.DATAFRAME, ToolChain.INCIDENT_RESPONSE),
-            ToolChainDependencies(create_generation_model=Mock()),
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = LocationCatalog([DataLocation("local", root.as_uri(), "local")])
+            registry, schemas = build_tools_for_chains(
+                (
+                    ToolChain.FILESYSTEM_ANALYTICS,
+                    ToolChain.INCIDENT_RESPONSE,
+                ),
+                ToolChainDependencies(location_catalog=catalog),
+            )
 
         assert len(registry) == 11
         assert list(registry) == [schema["name"] for schema in schemas]
-        assert "list_dataframes" in registry
+        assert "list_locations" in registry
         assert "get_server_health" in registry
 
-    def test_sql_defaults_describe_the_three_step_workflow(self) -> None:
-        """SQL-only prompts should exercise lookup, analysis, and visualization."""
-        system = default_system_prompt((ToolChain.SQL_ANALYZER,))
-        user = default_user_prompt((ToolChain.SQL_ANALYZER,))
+    def test_filesystem_defaults_describe_safe_discovery_and_querying(self) -> None:
+        """Filesystem-only prompts should guide discovery and safe queries."""
+        system = default_system_prompt((ToolChain.FILESYSTEM_ANALYTICS,))
+        user = default_user_prompt((ToolChain.FILESYSTEM_ANALYTICS,))
 
-        assert "lookup_sales_data first" in system
-        assert "analyze_sales_data" in system
-        assert "generate_visualization" in system
-        assert "analyze" in user
-        assert "visualization" in user
+        assert "read-only" in system
+        assert "inspect schemas" in system
+        assert "SELECT-only" in system
+        assert "available data locations" in user
 
 
 class TestRunToolComposition:
@@ -134,18 +149,41 @@ class TestRunToolComposition:
         assert "get_server_health" in registry
         generation_factory.assert_not_called()
 
-    def test_sql_chain_binds_the_selected_credential_and_model(self) -> None:
-        """SQL composition should request the provider's generic capability."""
+    def test_filesystem_chain_does_not_need_a_generation_model(self) -> None:
+        """Filesystem composition should use deterministic local operations."""
         generation_factory = Mock(return_value=Mock())
 
         registry, _ = build_run_tools(
             self._definition(generation_factory),
-            self._config(ToolChain.SQL_ANALYZER),
+            self._config(ToolChain.FILESYSTEM_ANALYTICS),
             "test-key",
         )
 
-        assert "lookup_sales_data" in registry
-        generation_factory.assert_called_once_with("test-key", "selected-model")
+        assert "list_locations" in registry
+        generation_factory.assert_not_called()
+
+    def test_filesystem_chain_uses_the_selected_zero_config_data_path(self) -> None:
+        """The CLI data-path override should reach the fallback local catalog."""
+        generation_factory = Mock(return_value=Mock())
+        with tempfile.TemporaryDirectory() as directory:
+            config = AgentRunConfig(
+                provider="openai",
+                model="selected-model",
+                tool_chains=(ToolChain.FILESYSTEM_ANALYTICS,),
+                system_prompt="system",
+                user_prompt="task",
+                data_path=Path(directory),
+            )
+
+            registry, _ = build_run_tools(
+                self._definition(generation_factory),
+                config,
+                "test-key",
+            )
+            locations = json.loads(registry["list_locations"]())
+
+        assert locations["locations"][0]["uri"] == Path(directory).resolve().as_uri()
+        generation_factory.assert_not_called()
 
 
 class TestOpenAIModelDiscovery:

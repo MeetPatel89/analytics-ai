@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from analytics_agent.filesystem import LocationCatalog, load_location_catalog
 from analytics_agent.providers.generation import GenerationModel
-from analytics_agent.tools.dataframe.catalog import DataframeCatalog, load_dataset_specs
-from analytics_agent.tools.dataframe.dataframe_registry import (
-    build_dataframe_definitions,
+from analytics_agent.tools.filesystem_analytics.registry import (
+    build_filesystem_definitions,
 )
 from analytics_agent.tools.incident_response.registry import (
     build_incident_response_definitions,
@@ -20,17 +20,13 @@ from analytics_agent.tools.provider_factories import (
     create_openai_tools,
 )
 from analytics_agent.tools.registry import ToolDefinition, ToolRegistry
-from analytics_agent.tools.sql_analyzer.registry import (
-    build_sql_analyzer_definitions,
-)
 
 
 class ToolChain(StrEnum):
     """Tool collections selectable by an agent run."""
 
-    DATAFRAME = "dataframe"
+    FILESYSTEM_ANALYTICS = "filesystem_analytics"
     INCIDENT_RESPONSE = "incident_response"
-    SQL_ANALYZER = "sql_analyzer"
 
 
 @dataclass(frozen=True)
@@ -50,24 +46,25 @@ GenerationModelFactory = Callable[[], GenerationModel]
 class ToolChainDependencies:
     """Lazy runtime dependencies shared by selectable tool-chain builders."""
 
-    create_generation_model: GenerationModelFactory
+    create_generation_model: GenerationModelFactory | None = None
     data_path: Path | None = None
-    sql_data_path: Path | None = None
+    locations_path: Path | None = None
+    location_catalog: LocationCatalog | None = None
 
 
 _TOOL_CHAIN_INFO = {
-    ToolChain.DATAFRAME: ToolChainInfo(
-        chain=ToolChain.DATAFRAME,
-        label="Dataframe analysis",
-        description="Query locally configured CSV datasets.",
+    ToolChain.FILESYSTEM_ANALYTICS: ToolChainInfo(
+        chain=ToolChain.FILESYSTEM_ANALYTICS,
+        label="Filesystem analytics",
+        description="Navigate and query configured local or ADLS data roots.",
         tool_names=(
-            "list_dataframes",
-            "describe_dataframe",
-            "preview_dataframe",
-            "search_rows",
-            "filter_rows",
-            "aggregate_rows",
-            "distinct_values",
+            "list_locations",
+            "list_directory",
+            "get_file_info",
+            "inspect_schema",
+            "preview_data",
+            "read_text_file",
+            "query_data",
         ),
     ),
     ToolChain.INCIDENT_RESPONSE: ToolChainInfo(
@@ -81,16 +78,6 @@ _TOOL_CHAIN_INFO = {
             "fetch_recent_logs",
             "restart_service",
             "escalate_incident",
-        ),
-    ),
-    ToolChain.SQL_ANALYZER: ToolChainInfo(
-        chain=ToolChain.SQL_ANALYZER,
-        label="SQL analyzer",
-        description="Query local sales data, analyze results, and draft charts.",
-        tool_names=(
-            "lookup_sales_data",
-            "analyze_sales_data",
-            "generate_visualization",
         ),
     ),
 }
@@ -113,12 +100,14 @@ def build_tools_for_chains(
     return create_openai_tools(definitions)
 
 
-def _build_dataframe_tools(
+def _build_filesystem_tools(
     dependencies: ToolChainDependencies,
 ) -> list[ToolDefinition]:
-    path = dependencies.data_path or Path(__file__).resolve().parents[1] / "data"
-    catalog = DataframeCatalog.from_specs(load_dataset_specs(str(path)))
-    return build_dataframe_definitions(catalog)
+    catalog = dependencies.location_catalog or load_location_catalog(
+        dependencies.locations_path,
+        data_path=dependencies.data_path,
+    )
+    return build_filesystem_definitions(catalog)
 
 
 def _build_incident_response_tools(
@@ -128,20 +117,10 @@ def _build_incident_response_tools(
     return build_incident_response_definitions()
 
 
-def _build_sql_analyzer_tools(
-    dependencies: ToolChainDependencies,
-) -> list[ToolDefinition]:
-    return build_sql_analyzer_definitions(
-        dependencies.create_generation_model(),
-        dependencies.sql_data_path,
-    )
-
-
 ToolChainBuilder = Callable[[ToolChainDependencies], list[ToolDefinition]]
 _TOOL_CHAIN_BUILDERS: dict[ToolChain, ToolChainBuilder] = {
-    ToolChain.DATAFRAME: _build_dataframe_tools,
+    ToolChain.FILESYSTEM_ANALYTICS: _build_filesystem_tools,
     ToolChain.INCIDENT_RESPONSE: _build_incident_response_tools,
-    ToolChain.SQL_ANALYZER: _build_sql_analyzer_tools,
 }
 
 
@@ -149,26 +128,19 @@ def default_system_prompt(chains: tuple[ToolChain, ...]) -> str:
     """Build a safe default system prompt for the selected tool chains."""
     selected = _unique_chains(chains)
     prompts: list[str] = []
-    if ToolChain.DATAFRAME in selected:
+    if ToolChain.FILESYSTEM_ANALYTICS in selected:
         prompts.append(
-            "You are a data assistant with access to configured CSV datasets. "
-            "Use dataframe tools for factual answers, do not answer from general "
-            "knowledge, and respond in plain English."
+            "You are a filesystem analytics assistant with read-only access to "
+            "configured data locations. Start by discovering locations and files, "
+            "inspect schemas before querying unfamiliar data, and ground every "
+            "factual answer in tool results. Use relative paths only. Use query_data "
+            "for bounded SELECT-only analytics over CSV or Parquet source aliases."
         )
     if ToolChain.INCIDENT_RESPONSE in selected:
         prompts.append(
             "You are an incident-response agent. Inspect server health and logs "
             "before taking action, restart only when evidence supports it, and "
             "escalate unresolved dependency failures. Summarize evidence and actions."
-        )
-    if ToolChain.SQL_ANALYZER in selected:
-        prompts.append(
-            "You are a sales-data assistant. Call lookup_sales_data first to "
-            "produce a validated, bounded result from the local sales table. Pass "
-            "that complete result envelope unchanged to analyze_sales_data for "
-            "interpretation or generate_visualization for Python plotting code. "
-            "Never invent rows, and remind the user to review generated code "
-            "before executing it."
         )
     if len(selected) > 1:
         prompts.append("Use only the tool chain relevant to the user's request.")
@@ -178,24 +150,19 @@ def default_system_prompt(chains: tuple[ToolChain, ...]) -> str:
 def default_user_prompt(chains: tuple[ToolChain, ...]) -> str:
     """Return a starter task for the selected tool chains."""
     selected = _unique_chains(chains)
-    if selected == (ToolChain.DATAFRAME,):
-        return "What are the visiting hours in the hospital?"
+    if selected == (ToolChain.FILESYSTEM_ANALYTICS,):
+        return (
+            "List the available data locations, find tabular files, and summarize "
+            "one useful result from the available data."
+        )
     if selected == (ToolChain.INCIDENT_RESPONSE,):
         return "Investigate payment-server-01 and resolve the incident."
-    if selected == (ToolChain.SQL_ANALYZER,):
+    if ToolChain.FILESYSTEM_ANALYTICS in selected:
         return (
-            "Look up a useful sales trend, analyze the returned result, and generate "
-            "Python visualization code for it."
+            "Discover the configured data files and summarize one useful, "
+            "evidence-backed result."
         )
-    if ToolChain.SQL_ANALYZER in selected:
-        return (
-            "Use the sales lookup to identify and analyze a useful trend, then "
-            "generate Python visualization code for the result."
-        )
-    return (
-        "Investigate payment-server-01. Use dataframe tools only when they provide "
-        "relevant supporting information."
-    )
+    return "Investigate payment-server-01 and summarize the evidence."
 
 
 def _unique_chains(chains: tuple[ToolChain, ...]) -> tuple[ToolChain, ...]:

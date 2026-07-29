@@ -2,18 +2,17 @@
 
 import contextlib
 import io
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
-import pandas as pd
-
+from analytics_agent.filesystem import DataLocation, LocationCatalog
 from analytics_agent.messages import FunctionCallMessage, function_call_message
 from analytics_agent.tools import (
-    DataframeCatalog,
-    DatasetSpec,
     ToolDefinition,
     ToolInput,
     ToolRegistry,
-    create_dataframe_tools,
+    create_filesystem_analytics_tools,
     create_incident_response_tools,
     run_tool_loop,
 )
@@ -75,26 +74,26 @@ class TestToolLoop:
         assert "Tool result:" in output.getvalue()
         assert "Final answer: None" in output.getvalue()
 
-    def test_dataframe_tool_call_is_executed_and_returned(self) -> None:
-        """The shared loop should also route dataframe calls through their registry."""
-        catalog = DataframeCatalog.from_specs(
-            [DatasetSpec("Records", pd.DataFrame({"record_id": [1, 2]}))]
-        )
-        registry, _ = create_dataframe_tools(catalog)
-        provider = FakeProvider(
-            function_call_message(
-                call_id="call_list_dataframes",
-                name="list_dataframes",
-                arguments_raw="{}",
+    def test_filesystem_tool_call_is_executed_and_returned(self) -> None:
+        """The shared loop should route filesystem calls through their registry."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = LocationCatalog([DataLocation("records", root.as_uri(), "local")])
+            registry, _ = create_filesystem_analytics_tools(catalog)
+            provider = FakeProvider(
+                function_call_message(
+                    call_id="call_list_locations",
+                    name="list_locations",
+                    arguments_raw="{}",
+                )
             )
-        )
 
-        with contextlib.redirect_stdout(io.StringIO()):
-            run_tool_loop(provider, registry, max_turns=2)
+            with contextlib.redirect_stdout(io.StringIO()):
+                run_tool_loop(provider, registry, max_turns=2)
 
         assert provider.turn == 2
-        assert provider.tool_outputs[0][0] == "call_list_dataframes"
-        assert "Records: 2 rows x 1 columns" in provider.tool_outputs[0][1]
+        assert provider.tool_outputs[0][0] == "call_list_locations"
+        assert '"name":"records"' in provider.tool_outputs[0][1]
 
     def test_display_formatter_does_not_change_the_provider_tool_output(self) -> None:
         """Console-friendly output should remain separate from model payloads."""

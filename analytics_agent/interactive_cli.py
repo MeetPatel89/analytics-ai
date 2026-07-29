@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import os
+from collections.abc import Sequence
+from pathlib import Path
 
 import dotenv
 from opentelemetry.trace import Tracer
@@ -38,10 +41,12 @@ class InteractiveCLI:
         console: Console | None = None,
         providers: tuple[ProviderDefinition, ...] | None = None,
         tracer: Tracer | None = None,
+        data_path: Path | None = None,
     ) -> None:
         self.console = console or Console()
         self.providers = providers if providers is not None else available_providers()
         self.tracer = tracer if tracer is not None else get_tracer()
+        self.data_path = data_path
 
     def run(self) -> None:
         """Run the top-level interactive menu until the user exits."""
@@ -111,6 +116,7 @@ class InteractiveCLI:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 verbose=verbose,
+                data_path=self.data_path,
             )
         except ValueError as exc:
             self.console.print(f"[red]Invalid configuration: {exc}[/red]")
@@ -271,7 +277,7 @@ class InteractiveCLI:
 
         while True:
             raw_selection = Prompt.ask(
-                "Select one or more tool chains (for example: 1,2 or 3)",
+                "Select one or more tool chains (for example: 1 or 1,2)",
                 default="1",
                 console=self.console,
             )
@@ -377,9 +383,24 @@ class InteractiveCLI:
         )
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Run the interactive agent CLI."""
+    parser = argparse.ArgumentParser(
+        description="Run the interactive filesystem analytics agent."
+    )
+    parser.add_argument(
+        "--data-path",
+        type=Path,
+        help=(
+            "Use this local root when locations.toml is absent "
+            "(default: project data/)."
+        ),
+    )
+    arguments = parser.parse_args(argv)
     try:
-        InteractiveCLI(tracer=configure_tracing()).run()
+        InteractiveCLI(
+            tracer=configure_tracing(),
+            data_path=arguments.data_path,
+        ).run()
     except KeyboardInterrupt:
         Console().print("\nGoodbye.")

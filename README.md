@@ -1,381 +1,282 @@
-# Analytics Agent
+# Filesystem Analytics Agent
 
-Analytics Agent is an experimental Python CLI for running OpenAI Responses API
-tool loops over local CSV data, a local sales Parquet dataset, or a simulated
-server-incident environment.
+Filesystem Analytics Agent is a Python CLI that lets an OpenAI tool-calling agent
+navigate, inspect, and query data in named filesystem roots. Phase 1 supports local
+filesystems and Azure Data Lake Storage Gen2 (ADLS Gen2) through one read-only
+`fsspec` abstraction.
 
-## Status and capabilities
+The analytics chain can:
 
-The repository currently provides:
+- Discover configured locations and browse directories or globs.
+- Inspect metadata and CSV or Parquet schemas.
+- Preview at most 20 tabular rows.
+- Read bounded ranges from txt, log, and JSON files.
+- Run single-statement DuckDB `SELECT` queries over one or more CSV or Parquet
+  files/globs, returning at most 50 rows.
 
-- Seven dataframe tools for discovering, describing, searching, filtering, and
-  aggregating locally supplied CSV files.
-- Four deterministic incident-response tools with simulated health, log, restart,
-  and escalation results.
-- Three SQL analyzer tools for querying a local sales Parquet file with DuckDB,
-  analyzing bounded results, and generating reviewable pandas/Matplotlib code.
-- Canonical typed chat messages with an OpenAI Responses API adapter.
-- Fixed sample entry points and an interactive flow for selecting an
-  account-available model, tool chains, prompts, and verbose diagnostics.
-
-This is a learning and development project, not a production incident-response
-system. It has no persistence, authentication layer, per-tool approval workflow,
-retrieval index, or automated model-quality evaluation.
+The existing deterministic incident-response chain remains available as a demo.
+The former dataframe and sales SQL-analyzer chains have been retired.
 
 ## Quickstart
 
 Prerequisites:
 
 - Python 3.14 or newer
+- [`uv`](https://docs.astral.sh/uv/)
 - An OpenAI API key
-- [`uv`](https://docs.astral.sh/uv/) for the preferred installation path
 
-From the repository root, install the application and development dependencies:
+Install the application and test dependencies:
 
 ```sh
 uv sync --extra dev
 ```
 
-Create a local `.env` file:
+Add the model-provider credential to `.env`:
 
-```sh
-printf 'OPENAI_API_KEY=your-key-here\n' > .env
+```dotenv
+OPENAI_API_KEY=your-key-here
 ```
 
-The incident scenario requires no local data, so it is the shortest working run:
+For a zero-configuration local run, create the default project-root `data/`
+directory and add CSV, Parquet, txt, log, or JSON files:
 
 ```sh
-uv run incident_agent
-```
-
-It uses `gpt-4o-mini` to investigate `payment-server-01`. Tool calls and results
-are printed as the run progresses, followed by the model's final response.
-
-To install without `uv`, use a Python 3.14+ virtual environment:
-
-```sh
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-```
-
-Run installed commands directly when the virtual environment is active.
-
-## Local CSV setup
-
-CSV data is intentionally local and is not tracked by Git. Create
-`analytics_agent/data/` and place one or more `.csv` files directly inside it:
-
-```sh
-mkdir -p analytics_agent/data
-cp /path/to/your-dataset.csv analytics_agent/data/
-uv run dataframe_agent
-```
-
-The loader is non-recursive and reads every `*.csv` file in filename order. Any
-CSV filename is accepted. These filenames receive friendlier built-in names and
-descriptions:
-
-| Filename | Dataset name |
-| --- | --- |
-| `saas_docs.csv` | `SaaS Docs` |
-| `credit_card_terms.csv` | `Credit Card Terms` |
-| `hospital_policy.csv` | `Hospital Policy` |
-| `ecommerce_faqs.csv` | `Ecommerce FAQs` |
-
-Other files use their filename stem as the dataset name. The fixed dataframe
-entry point asks, “What are the visiting hours in the hospital?”; use the
-interactive command for a task tailored to different data.
-
-The dataframe chain loads only CSV files. JSON, spreadsheets, nested directories,
-and remote data sources are not supported by that chain.
-
-## Local sales Parquet setup
-
-The SQL analyzer expects this exact Git-ignored local filename:
-
-```text
-analytics_agent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet
-```
-
-Create the directory and copy the sales dataset into place before selecting the
-SQL analyzer chain:
-
-```sh
-mkdir -p analytics_agent/data
-cp /path/to/Store_Sales_Price_Elasticity_Promotions_Data.parquet \
-  analytics_agent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet
+mkdir -p data
+cp /path/to/example.parquet data/
 uv run agent
 ```
 
-DuckDB materializes the Parquet data into a private in-memory `sales` table and
-then disables external access. Generated SQL must parse as exactly one `SELECT`
-statement. Results are limited to 50 rows and include a `truncated` flag.
+Select **Filesystem analytics** in the interactive flow. The CLI then lets you
+select an account-available model, edit the generated prompts, inspect the run
+summary, and confirm before the first model request.
 
-## Interactive usage
-
-Start the configuration flow with:
+To use a different local root without creating `locations.toml`, pass:
 
 ```sh
-uv run agent
+uv run agent --data-path /srv/analytics
 ```
 
-The flow can:
-
-1. Select a registered provider.
-2. Fetch and select from the model IDs currently visible to that provider account.
-3. Select any combination of the dataframe, incident-response, and SQL analyzer
-   chains.
-4. Accept generated system and user prompts or collect replacements.
-5. Enable raw provider-response and serialized-history diagnostics.
-6. Show a summary and require confirmation before making the model request.
-
-The `View available providers, models, and tool chains` menu is read-only. Model
-listing still requires the selected provider's credential and network access.
-OpenAI currently uses `OPENAI_API_KEY`. Model lists are fetched fresh and are not
-cached between runs; configurations are not saved.
-
-## Observability: Phase 1, Step 1
-
-Each installed entry point now configures OpenTelemetry and creates one root
-`agent_run` span around an actual agent run. Every entry point adds:
-
-- `agent.model`
-- `agent.tool_chains`
-- `agent.max_turns`
-
-Interactive runs also add the selected provider plus the system and user prompts.
-
-Tracing is inert until an entry point calls `configure_tracing()`. Importing the
-package or constructing `InteractiveCLI` directly in a test uses OpenTelemetry's
-non-recording default tracer, so no collector, backend, or new environment
-variable is required.
-
-Run any agent command normally:
+The incident demo does not need data:
 
 ```sh
 uv run incident_agent
 ```
 
-When the run finishes, `ConsoleSpanExporter` prints the root span as JSON. Use
-that object to identify the six pieces introduced in this step:
+## Named locations
 
-| Piece | Where to see it |
-| --- | --- |
-| Tracer provider | `configure_tracing()` creates the SDK object that owns tracing configuration. |
-| Tracer | The value returned by `configure_tracing()` creates the `agent_run` span. |
-| Span | The exported object named `agent_run`; it measures one run's start, end, and metadata. |
-| Resource | `resource.attributes.service.name` identifies the emitting service as `analytics-agent`. |
-| Span processor | `SimpleSpanProcessor` receives each completed span immediately. |
-| Exporter | `ConsoleSpanExporter` turns that span into terminal JSON. |
+Create `locations.toml` in the project root to expose more than one root. Locations
+can be local or ADLS Gen2:
 
-In the JSON, `context.trace_id` identifies the whole trace and
-`context.span_id` identifies this span within it. `parent_id` is `null` because
-this is the root. `start_time` and `end_time` bound the run, `attributes` hold
-the run metadata, and `resource` describes the process that emitted the
-span. There is no Phoenix or OTLP connection yet; those arrive in Phase 2.
+```toml
+[locations.local]
+uri = "file:///srv/analytics"
+backend = "local"
 
-## Observability: Phase 1, Step 2
+[locations.lake]
+uri = "abfs://curated@myaccount.dfs.core.windows.net/sales"
+backend = "adls"
+```
 
-The root span now contains a hierarchy of smaller operations:
+`backend` may be omitted when the URI scheme identifies it. Local filesystem paths
+without a scheme are also accepted, although absolute `file://` URIs make the root
+unambiguous.
+
+To keep configuration elsewhere, set:
+
+```sh
+export ANALYTICS_AGENT_LOCATIONS=/etc/analytics-agent/locations.toml
+```
+
+An explicit override must exist and contain either `[locations.<name>]` tables, as
+above, or `[[locations]]` entries:
+
+```toml
+[[locations]]
+name = "local"
+uri = "file:///srv/analytics"
+
+[[locations]]
+name = "lake"
+uri = "abfs://curated@myaccount.dfs.core.windows.net/sales"
+```
+
+Credentials are rejected in `locations.toml`. Keep them in the environment or
+`.env`.
+
+## ADLS Gen2 authentication
+
+The ADLS backend resolves credentials in this order:
+
+1. `AZURE_STORAGE_ACCOUNT_KEY`
+2. `AZURE_STORAGE_SAS_TOKEN`
+3. Azure `DefaultAzureCredential`
+
+Include the account in the URI, as in
+`container@account.dfs.core.windows.net`, or set
+`AZURE_STORAGE_ACCOUNT_NAME`. `DefaultAzureCredential` covers common developer
+and deployed identities, including Azure CLI login, service-principal environment
+variables, and managed identity.
+
+Example with an account key:
+
+```dotenv
+AZURE_STORAGE_ACCOUNT_NAME=myaccount
+AZURE_STORAGE_ACCOUNT_KEY=your-account-key
+```
+
+Example with a SAS token:
+
+```dotenv
+AZURE_STORAGE_ACCOUNT_NAME=myaccount
+AZURE_STORAGE_SAS_TOKEN=your-sas-token
+```
+
+Do not put secrets or SAS query strings in location URIs.
+
+## Analytics tools
+
+| Tool | Purpose | Phase 1 bounds |
+| --- | --- | --- |
+| `list_locations` | List named roots, URIs, and backend kinds. | Configured roots only |
+| `list_directory` | List a relative directory or glob with type, size, and modification metadata. | At most 200 entries and 64 KiB output |
+| `get_file_info` | Inspect one relative path and detect its format by extension. | One entry |
+| `inspect_schema` | Return Arrow column names and types for CSV or Parquet. | At most 500 columns and 64 KiB output |
+| `preview_data` | Return leading CSV or Parquet rows. | At most 20 rows and 64 KiB output |
+| `read_text_file` | Read UTF-8 from txt, log, or JSON at a byte offset. | At most 32 KiB read and 64 KiB output |
+| `query_data` | Run DuckDB SQL over safe source aliases. | One `SELECT`, 10 sources, 100 matched files, 50 rows, and 64 KiB output |
+
+`query_data` receives a list of source declarations. Each declaration gives a
+temporary SQL view alias, a location name, and a relative file or glob. For
+example, a tool call can expose `2026/*.parquet` as `sales`, then run:
+
+```sql
+SELECT region, SUM(revenue) AS revenue
+FROM sales
+GROUP BY region
+ORDER BY revenue DESC
+```
+
+CSV and Parquet are supported by schema, preview, and query operations. Txt, log,
+and JSON are supported by bounded text reads; JSON is not a tabular query format
+in Phase 1.
+
+## Safety boundary
+
+Phase 1 is read-only:
+
+- Every tool path is resolved through `LocationCatalog`. Absolute paths,
+  backslashes, URI paths, encoded traversal, `..` segments, and local symlinks
+  escaping a configured root are rejected.
+- The `fsspec` wrapper hides mutation APIs and accepts only binary-read mode.
+- DuckDB sees only catalog-resolved source views and configured roots.
+- User SQL must parse as exactly one `SELECT` statement.
+- After source registration, DuckDB external access is disabled except for
+  explicitly allowed configured roots, and its configuration is locked.
+- Directory, source-file, byte, column, and row limits bound results sent back to
+  the model.
+
+These controls reduce accidental access and mutation; they do not make the CLI a
+multi-tenant sandbox. Run it under an operating-system identity that already has
+the minimum required read permissions.
+
+Tool outputs, prompts, and selected result rows are sent to the configured model
+provider. Do not expose data that may not be transmitted to that provider.
+Verbose diagnostics and console tracing can also contain prompts and tool
+arguments.
+
+## Architecture
 
 ```text
-agent_run
-├── agent.turn                         # turn 1
-│   ├── llm.generate
-│   └── tool.execute                   # zero or more tool calls
-└── agent.turn                         # turn 2
-    └── llm.generate
+interactive_cli
+└── agent_runtime + shared tool loop
+    ├── filesystem_analytics tool chain
+    │   ├── navigation tools
+    │   ├── Arrow-backed schema and preview tools
+    │   └── guarded DuckDB query tool
+    └── incident_response demo chain
+        └── deterministic in-memory fixtures
+
+filesystem_analytics
+└── LocationCatalog
+    └── ReadOnlyFileSystem (fsspec)
+        ├── LocalFileSystem
+        └── AzureBlobFileSystem (adlfs / ADLS Gen2)
 ```
 
-Each `with tracer.start_as_current_span(...)` block makes its span current for
-the duration of that block. OpenTelemetry carries that current span through
-normal synchronous Python calls using context-local state. Consequently,
-`OpenAIProvider.generate()` and `ToolRegistry.execute()` become children of the
-active turn without receiving a span or ID argument.
+The shared tool registry validates every call with Pydantic models configured to
+reject extra fields. Provider adapters translate those provider-neutral
+definitions into strict OpenAI function schemas. Malformed calls return readable
+tool errors to the model so a later turn can correct them.
 
-The custom attributes are intentionally small and explicit at this stage:
-
-| Span | Attributes |
-| --- | --- |
-| `agent.turn` | `agent.turn.number`, `agent.turn.max` |
-| `llm.generate` | model, request input/tool counts, response ID/model/output count |
-| `tool.execute` | tool name and JSON-encoded arguments |
-
-Run an entry point again:
-
-```sh
-uv run incident_agent
-```
-
-For every exported object, compare `context.trace_id`, `context.span_id`, and
-`parent_id`. All objects in one run share a trace ID. A child object's
-`parent_id` equals its parent's span ID. Completed child spans are exported
-before their still-running parents, so the console JSON is usually leaf-first;
-the IDs, rather than print order, reconstruct the tree.
-
-This learning configuration records tool arguments, and interactive root spans
-also record prompts. Treat the console output as potentially sensitive and do
-not put credentials or private data in prompts or tool inputs. Content
-redaction and production-safe capture policy are intentionally outside this
-fundamentals step.
-
-## Tool behavior
-
-The dataframe chain exposes:
-
-- `list_dataframes`
-- `describe_dataframe`
-- `preview_dataframe`
-- `search_rows`
-- `filter_rows`
-- `aggregate_rows`
-- `distinct_values`
-
-Tool inputs are validated before execution. Preview results are limited to 20
-rows, general query results to 50 rows, and distinct-value results to 100 rows.
-The catalog infers an ID column from columns whose names contain `id`, preferring
-a complete unique column.
-
-The incident-response chain exposes:
-
-- `get_server_health`
-- `fetch_recent_logs`
-- `restart_service`
-- `escalate_incident`
-
-All four operate on in-memory fixtures. In particular, restart and escalation only
-return simulated success JSON; they do not contact servers, restart processes,
-page responders, or change external state.
-
-The SQL analyzer chain exposes:
-
-- `lookup_sales_data`
-- `analyze_sales_data`
-- `generate_visualization`
-
-`lookup_sales_data` asks the selected model for a DuckDB query, validates it, and
-returns a JSON envelope containing the SQL, ordered columns, normalized positional
-row arrays, returned row count, and truncation status. Each row value aligns with
-the column at the same index. The CLI displays the first five returned rows as a
-Polars dataframe while sending the complete JSON envelope back to the model.
-`analyze_sales_data` accepts that complete envelope and generates a grounded text
-analysis. `generate_visualization` first selects validated line, bar, or scatter
-axes, then returns self-contained pandas/Matplotlib source with the result rows
-embedded.
-
-Visualization code is syntax-checked but never executed by the application.
-Review generated code before running it.
-
-## Architecture and workflow
-
-The entry points are composition roots: they load configuration, assemble tool
-definitions and schemas, create the provider, and start the shared loop. The
-interactive runtime uses a provider registry for display metadata, credential
-lookup, model discovery, and provider construction. Domain tools remain
-provider-neutral; the OpenAI schema factory adapts their Pydantic input contracts
-at the provider boundary. Registered providers expose a provider-neutral
-text/structured-generation capability that tool chains can request lazily. The
-SQL analyzer uses that capability with the credential and model selected for the
-outer agent run.
-
-For each model turn:
-
-1. `OpenAIProvider` serializes canonical history and calls the Responses API.
-2. The provider adapter normalizes response messages and function calls.
-3. The shared loop dispatches each call through `ToolRegistry`.
-4. Pydantic rejects missing, extra, or invalid tool arguments.
-5. Tool results are appended to history and supplied on the next model turn.
-6. The loop prints a final answer when no function calls remain.
-
-Malformed JSON tool arguments are returned to the model as readable tool errors,
-allowing a later turn to correct them. The loop stops after 10 model turns if no
-final response is produced.
+Each CLI run creates an OpenTelemetry `agent_run` span with child spans for model
+turns, provider generation, and tool execution. The current console exporter is
+intended for local learning and diagnostics.
 
 ## Configuration reference
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | none | Required for model listing and agent runs; loaded from the environment or `.env`. |
-| Static entry-point model | `gpt-4o-mini` | Used by `dataframe_agent` and `incident_agent`. |
-| Interactive provider | `openai` only | Explicitly selected from the provider registry. |
-| Interactive model | none | Fetched after provider selection and selected from IDs returned for the configured account. |
-| CSV directory | `analytics_agent/data/` | Local, Git-ignored, and required only for the dataframe chain. |
-| Sales Parquet file | `analytics_agent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet` | Local, Git-ignored, and required only for the SQL analyzer chain. |
-| Maximum model turns | `10` | The loop stops without a final response after this limit. |
-| Verbose diagnostics | off | Available through the interactive flow. |
-
-The interactive model list is account-scoped but is not filtered to models that
-support the Responses API or function tools. Selecting an incompatible model
-causes the provider request to fail with an API error.
-
-## Data handling and limitations
-
-- CSV files are read locally with pandas when the dataframe chain is assembled.
-  The sales Parquet file is read locally by DuckDB only when sales lookup runs.
-- The outer model receives the user prompt, tool schemas, and tool results. SQL
-  analyzer generation calls also receive the sales schema, the analysis or
-  visualization goal, and relevant bounded query-result rows. Do not use
-  sensitive local data unless transmitting those values to the selected provider
-  is acceptable.
-- CSV and Parquet files are not automatically uploaded in full. A generated sales
-  query can nevertheless select up to 50 rows, and those rows are returned to the
-  outer model. Analysis and visualization calls send that result envelope to the
-  generation model as well.
-- SQL analyzer workflows make additional provider requests with the same selected
-  model: one for SQL generation, one for analysis, and two for visualization
-  configuration and source generation. These calls add latency and may add usage
-  charges under the provider account.
-- Responses are grounded in tool output only to the extent that the selected model
-  follows the prompt and calls the appropriate tools.
-- Tool output is printed to the terminal and retained only in in-memory
-  conversation history for the current process.
-- Provider and CSV-loading errors are reported, but there is no retry, rate-limit
-  backoff, checkpointing, or recovery across process restarts.
-- Verbose mode can print model responses and conversation history. Avoid it when
-  terminal output may be retained in an insecure location.
+| `OPENAI_API_KEY` | none | Required for model discovery and agent runs. |
+| `ANALYTICS_AGENT_LOCATIONS` | project `locations.toml` | Optional alternate TOML path. |
+| `agent --data-path PATH` | project `data/` | Alternate zero-config local root; ignored when locations TOML is present. |
+| Local data root without TOML | project `data/` | Created by the user; never written by the agent. |
+| `AZURE_STORAGE_ACCOUNT_NAME` | account parsed from URI | Required if an ADLS URI omits its account host. |
+| `AZURE_STORAGE_ACCOUNT_KEY` | none | Highest-priority ADLS credential. |
+| `AZURE_STORAGE_SAS_TOKEN` | none | Used only when an account key is absent. |
+| Azure identity variables/login | environment-dependent | Used by `DefaultAzureCredential` as the fallback. |
+| Maximum model turns | `10` | Stops a tool loop that never produces a final answer. |
 
 ## Testing and quality checks
 
-The unit suite uses in-memory data and test doubles; it does not make live OpenAI
-requests:
+The suite is fully offline. It uses temporary local directories and fsspec's
+`MemoryFileSystem` as a remote backend, and mocks ADLS construction:
 
 ```sh
 uv run pytest
-```
-
-Run lint and formatting checks with:
-
-```sh
 uv run ruff check .
 uv run ruff format --check .
 ```
 
-The tests cover message normalization, provider history, configuration
-validation, tool composition and validation, dataframe operations, incident
-fixtures, bounded DuckDB queries, SQL restrictions, visualization source
-validation, loop dispatch, and the offline OpenTelemetry span hierarchy. There
-are no model-quality benchmarks or end-to-end live API tests.
+Coverage includes location configuration, traversal and symlink rejection,
+read-only enforcement, Azure authentication priority, local/remote navigation,
+CSV and Parquet inspection, bounded text reads, DuckDB query caps, external-path
+blocking, tool schemas, runtime composition, provider adapters, message handling,
+the shared loop, and tracing.
 
 ## Project structure
 
 ```text
 analytics_agent/
-├── agent_runtime.py          # Validated interactive run configuration
-├── dataframe_main.py         # Fixed dataframe sample entry point
-├── incident_response_main.py # Fixed simulated-incident entry point
-├── interactive_cli.py        # Interactive terminal configuration
-├── messages/                 # Canonical message models and OpenAI adapters
-├── observability/            # OpenTelemetry configuration
-├── providers/                # Provider boundary and OpenAI implementation
+├── agent_runtime.py
+├── filesystem/
+│   ├── backends.py           # Local/ADLS factories and read-only wrapper
+│   ├── config.py             # locations.toml and zero-config fallback
+│   └── locations.py          # Named roots and containment
+├── interactive_cli.py
+├── incident_response_main.py
+├── messages/
+├── observability/
+├── providers/
 └── tools/
-    ├── dataframe/            # CSV catalog, contracts, and dataframe operations
-    ├── incident_response/    # Simulated incident contracts and operations
-    ├── sql_analyzer/         # DuckDB sales lookup and model-assisted analysis
-    ├── registry.py           # Validated provider-neutral dispatch
-    ├── provider_factories.py # OpenAI tool-schema adapter
-    ├── tool_chains.py        # Selectable tool-chain composition
-    └── tool_loop.py          # Shared model/tool orchestration
-tests/                        # Offline unit tests
+    ├── filesystem_analytics/ # Navigation, inspection, and DuckDB query tools
+    ├── incident_response/    # Simulated demo operations
+    ├── provider_factories.py
+    ├── registry.py
+    ├── tool_chains.py
+    └── tool_loop.py
+tests/
 ```
+
+## Phase 2 roadmap
+
+The following are future work, not Phase 1 features:
+
+- Delta Lake readers through `deltalake`
+- Iceberg readers through `pyiceberg`
+- S3 backend configuration
+- Dataset profiling such as null counts and distributions
+- Partition-aware dataset discovery
+- Explicit scratch locations for saving results
+
+The storage catalog and tool boundaries are designed so new format handlers and
+fsspec backends can be added without changing the shared agent runtime.

@@ -167,8 +167,8 @@ class TestInteractiveCLIProvider:
             },
         )
 
-    def test_sql_chain_uses_the_same_runtime_composition_path(self) -> None:
-        """The CLI should not contain SQL-specific dependency wiring."""
+    def test_filesystem_chain_uses_the_same_runtime_composition_path(self) -> None:
+        """The CLI should use the shared composition path for filesystem tools."""
         tool_registry = Mock()
         tool_schemas = [{"type": "function"}]
         with (
@@ -181,7 +181,7 @@ class TestInteractiveCLIProvider:
             patch.object(
                 self.cli,
                 "_select_tool_chains",
-                return_value=(ToolChain.SQL_ANALYZER,),
+                return_value=(ToolChain.FILESYSTEM_ANALYTICS,),
             ),
             patch.object(
                 self.cli,

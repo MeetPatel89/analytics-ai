@@ -15,3 +15,5 @@ wheels/
 # misc
 notebooks/
 data/
+
+.vscode/launch.json
