@@ -173,8 +173,7 @@ the minimum required read permissions.
 
 Tool outputs, prompts, and selected result rows are sent to the configured model
 provider. Do not expose data that may not be transmitted to that provider.
-Verbose diagnostics and console tracing can also contain prompts and tool
-arguments.
+Verbose diagnostics and trace exports can also contain prompts and tool arguments.
 
 ## Architecture
 
@@ -199,8 +198,12 @@ definitions into strict OpenAI function schemas. Malformed calls return readable
 tool errors to the model so a later turn can correct them.
 
 Each CLI run creates an OpenTelemetry `agent_run` span with child spans for model
-turns, provider generation, and tool execution. The current console exporter is
-intended for local learning and diagnostics.
+turns, provider generation, and tool execution. Traces use the console exporter
+by default. Set `OTEL_TRACES_EXPORTER=otlp` to send them through OTLP over
+HTTP/protobuf; the exporter reads the standard
+`OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` settings. OTLP
+spans are batched during a run and flushed when the CLI exits. Set
+`OTEL_TRACES_EXPORTER=none` to disable export.
 
 ## Configuration reference
 
@@ -215,6 +218,9 @@ intended for local learning and diagnostics.
 | `AZURE_STORAGE_SAS_TOKEN` | none | Used only when an account key is absent. |
 | Azure identity variables/login | environment-dependent | Used by `DefaultAzureCredential` as the fallback. |
 | Maximum model turns | `10` | Stops a tool loop that never produces a final answer. |
+| `OTEL_TRACES_EXPORTER` | `console` | Trace exporter: `console`, `otlp` (HTTP/protobuf), or `none`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | SDK default | OTLP base endpoint; used when the trace exporter is `otlp`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | none | Comma-separated OTLP request headers, such as backend authorization. |
 
 ## Testing and quality checks
 

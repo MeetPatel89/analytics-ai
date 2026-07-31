@@ -22,7 +22,11 @@ from analytics_agent.agent_runtime import (
     available_providers,
     build_run_tools,
 )
-from analytics_agent.observability import configure_tracing, get_tracer
+from analytics_agent.observability import (
+    configure_tracing,
+    get_tracer,
+    shutdown_tracing,
+)
 from analytics_agent.tools import (
     FILESYSTEM_ANALYTICS_TOOL_NAMES,
     run_tool_loop,
@@ -360,6 +364,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         ),
     )
     arguments = parser.parse_args(argv)
+    dotenv.load_dotenv()
     try:
         InteractiveCLI(
             tracer=configure_tracing(),
@@ -367,3 +372,5 @@ def main(argv: Sequence[str] | None = None) -> None:
         ).run()
     except KeyboardInterrupt:
         Console().print("\nGoodbye.")
+    finally:
+        shutdown_tracing()

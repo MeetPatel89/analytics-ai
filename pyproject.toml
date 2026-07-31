@@ -12,6 +12,7 @@ dependencies = [
     "fsspec>=2024.12.0",
     "openai>=2.45.0",
     "opentelemetry-api>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
     "opentelemetry-sdk>=1.44.0",
     "pyarrow>=25.0.0",
     "python-dotenv>=1.2.2",
@@ -23,6 +24,7 @@ dev = [
     "ipykernel>=7.3.0",
     "pytest>=8.4.0",
     "ruff>=0.12.0",
+    "requests>=2.34.2",
 ]
 
 [build-system]

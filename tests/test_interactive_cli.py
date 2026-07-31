@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from rich.console import Console
 
 from analytics_agent.agent_runtime import ProviderDefinition
-from analytics_agent.interactive_cli import InteractiveCLI
+from analytics_agent.interactive_cli import InteractiveCLI, main
 
 
 class TestInteractiveCLIProvider:
@@ -164,3 +164,21 @@ class TestInteractiveCLIProvider:
         assert "Filesystem analytics" in output
         assert "list_locations" in output
         assert "query_data" in output
+
+    def test_main_shuts_down_tracing_after_cli_exit(self) -> None:
+        """The entry point should flush tracing even when the CLI returns."""
+        with (
+            patch("analytics_agent.interactive_cli.dotenv.load_dotenv") as load_dotenv,
+            patch("analytics_agent.interactive_cli.configure_tracing") as configure,
+            patch("analytics_agent.interactive_cli.InteractiveCLI") as cli_type,
+            patch("analytics_agent.interactive_cli.shutdown_tracing") as shutdown,
+        ):
+            main([])
+
+        load_dotenv.assert_called_once_with()
+        cli_type.assert_called_once_with(
+            tracer=configure.return_value,
+            data_path=None,
+        )
+        cli_type.return_value.run.assert_called_once_with()
+        shutdown.assert_called_once_with()

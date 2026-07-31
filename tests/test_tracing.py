@@ -5,6 +5,9 @@ import re
 import subprocess
 import sys
 import textwrap
+from unittest.mock import Mock, patch
+
+from analytics_agent.observability import shutdown_tracing
 
 
 class TestTracingConfiguration:
@@ -58,6 +61,82 @@ class TestTracingConfiguration:
         assert (
             exported_span["resource"]["attributes"]["service.name"] == "analytics-agent"
         )
+
+    def test_none_exporter_suppresses_configured_spans(self) -> None:
+        """The standard none value should install no exporting processor."""
+        completed = self._run_python(
+            """
+            import os
+
+            from analytics_agent.observability import (
+                configure_tracing,
+                shutdown_tracing,
+            )
+
+            os.environ["OTEL_TRACES_EXPORTER"] = "none"
+            tracer = configure_tracing()
+            with tracer.start_as_current_span("discarded_span"):
+                pass
+            shutdown_tracing()
+            """
+        )
+
+        assert completed.stdout == ""
+
+    def test_otlp_exporter_uses_batch_processor_and_environment_config(self) -> None:
+        """OTLP should be batched and constructed without custom transport args."""
+        completed = self._run_python(
+            """
+            import json
+            import os
+            from unittest.mock import patch
+
+            os.environ["OTEL_TRACES_EXPORTER"] = "otlp"
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://otel.example.test"
+            os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = "Authorization=test"
+
+            with (
+                patch(
+                    "analytics_agent.observability.tracing.OTLPSpanExporter"
+                ) as exporter_type,
+                patch(
+                    "analytics_agent.observability.tracing.BatchSpanProcessor"
+                ) as processor_type,
+            ):
+                from analytics_agent.observability import configure_tracing
+
+                configure_tracing()
+                print(
+                    json.dumps(
+                        {
+                            "exporter_call": exporter_type.call_args.args,
+                            "processor_exporter_is_otlp": (
+                                processor_type.call_args.args[0]
+                                is exporter_type.return_value
+                            ),
+                        }
+                    )
+                )
+            """
+        )
+        selection = json.loads(completed.stdout)
+
+        assert selection == {
+            "exporter_call": [],
+            "processor_exporter_is_otlp": True,
+        }
+
+    def test_shutdown_flushes_the_configured_provider(self) -> None:
+        """Application shutdown should delegate to the SDK provider."""
+        provider = Mock()
+
+        with patch(
+            "analytics_agent.observability.tracing._tracer_provider",
+            provider,
+        ):
+            shutdown_tracing()
+
+        provider.shutdown.assert_called_once_with()
 
     def test_agent_operations_form_one_parent_child_trace(self) -> None:
         """Turn, LLM, and tool spans should inherit the active parent context."""
