@@ -53,7 +53,6 @@ class InteractiveCLI:
 
     def run(self) -> None:
         """Run the top-level interactive menu until the user exits."""
-        dotenv.load_dotenv()
         self.console.print(Panel.fit("Analytics Agent", style="bold cyan"))
         while True:
             self.console.print(
