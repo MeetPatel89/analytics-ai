@@ -1,0 +1,7 @@
+*
+!analytics_agent/
+!analytics_agent/**
+!pyproject.toml
+!uv.lock
+!README.md
+

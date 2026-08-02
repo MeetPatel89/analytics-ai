@@ -205,6 +205,67 @@ HTTP/protobuf; the exporter reads the standard
 spans are batched during a run and flushed when the CLI exits. Set
 `OTEL_TRACES_EXPORTER=none` to disable export.
 
+## Run with Docker Compose
+
+The agent can run in a container with its application code and Python
+dependencies baked into an immutable image. Compose describes how to build that
+image and run the interactive CLI with its runtime configuration:
+
+```text
+host .env ───────────────> agent container environment
+host ./data/ ──read-only─> /data
+                             │
+                             └── OpenAI API
+```
+
+This first containerization step has one service because the project currently
+has one application process. It avoids creating an artificial service boundary;
+an observability backend can become a second service in a later phase.
+
+Create `data/` and `.env` as described in the quickstart, then build the image:
+
+```sh
+docker compose build
+```
+
+The Docker build context contains only the package metadata, lockfile, README,
+and application source. In particular, `.env` and `data/` are excluded and are
+never baked into the image. Compose injects `.env` when the container starts and
+mounts `data/` at `/data` read-only.
+
+Run the interactive CLI in a temporary container:
+
+```sh
+docker compose run --rm agent
+```
+
+`run` allocates a container from the service definition, while `--rm` removes
+that container after the CLI exits. The downloaded base layers and locally built
+`analytics-agent:local` image remain, so subsequent runs are fast. Inspect the
+packaged CLI without starting an agent session with:
+
+```sh
+docker compose run --rm agent --help
+```
+
+Source code is copied into the image rather than mounted. Rebuild after changing
+the application:
+
+```sh
+docker compose build
+docker compose run --rm agent
+```
+
+Compose may create a project network for a run even though this one-service
+exercise does not use container-to-container traffic. Remove unused Compose
+resources with `docker compose down`. To also remove the locally built image,
+run `docker image rm analytics-agent:local`.
+
+The initial Compose workflow intentionally uses the zero-configuration local
+data root. Container mounts for custom `locations.toml` files and additional
+local roots can be added as a later exercise; ADLS credentials remain ordinary
+runtime environment variables.
+
 ## Configuration reference
 
 | Setting | Default | Notes |
@@ -242,6 +303,8 @@ the shared loop, and tracing.
 ## Project structure
 
 ```text
+Dockerfile                     # Immutable agent image
+compose.yaml                   # Interactive agent service
 analytics_agent/
 ├── agent_runtime.py
 ├── filesystem/
