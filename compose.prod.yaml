@@ -1,0 +1,19 @@
+name: analytics-agent-prod
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UV_SYNC_OPTIONS: --no-editable --reinstall-package analytics-agent
+    image: analytics-agent:local
+    env_file:
+      - .env
+    stdin_open: true
+    tty: true
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+        read_only: true

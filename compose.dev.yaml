@@ -1,0 +1,24 @@
+name: analytics-agent-dev
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UV_SYNC_OPTIONS: ""
+    image: analytics-agent:dev
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app
+    stdin_open: true
+    tty: true
+    volumes:
+      - type: bind
+        source: ./analytics_agent
+        target: /app/analytics_agent
+      - type: bind
+        source: ./data
+        target: /data
+        read_only: true

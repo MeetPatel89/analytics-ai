@@ -12,8 +12,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
 
 COPY analytics_agent ./analytics_agent
+ARG UV_SYNC_OPTIONS="--no-editable --reinstall-package analytics-agent"
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable
+    uv sync --locked --no-dev ${UV_SYNC_OPTIONS}
 
 RUN groupadd --gid 10001 agent \
     && useradd --uid 10001 --gid agent --create-home agent
@@ -26,4 +27,3 @@ USER agent
 
 ENTRYPOINT ["agent"]
 CMD ["--data-path", "/data"]
-
