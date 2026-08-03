@@ -1,0 +1,15 @@
+# Add this override when the containerized agent exports OTLP traces to the
+# repository's local Langfuse Compose project.
+services:
+  agent:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://langfuse-web:3000/api/public/otel
+    networks:
+      - langfuse
+
+networks:
+  langfuse:
+    external: true
+    # docker/langfuse.compose.yaml has a fixed project name, so its default
+    # network always has this stable Docker name.
+    name: analytics-agent-langfuse_default

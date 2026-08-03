@@ -205,6 +205,85 @@ HTTP/protobuf; the exporter reads the standard
 spans are batched during a run and flushed when the CLI exits. Set
 `OTEL_TRACES_EXPORTER=none` to disable export.
 
+### Local Langfuse backend
+
+The repository includes a local-only Langfuse v4 deployment based on Langfuse's
+official Compose topology. It runs the web UI, background worker, Postgres,
+ClickHouse, Redis, and MinIO. All published ports bind to `127.0.0.1`, and the
+datastores use persistent named volumes. The local template disables Langfuse's
+Redis socket watchdog because all services communicate over the direct Compose
+network; production deployments should retain a positive timeout.
+
+For a fresh checkout, create the ignored secrets file and replace every
+`CHANGEME` value with a long random value. `ENCRYPTION_KEY` must be 64 hexadecimal
+characters, and project keys retain their `pk-lf-` / `sk-lf-` prefixes:
+
+```sh
+cp docker/langfuse.env.example docker/langfuse.env
+openssl rand -hex 32
+```
+
+Start the stack and follow its application logs. This is a prerequisite for an
+agent configured with the OTLP endpoint: building or starting the agent does
+not start Langfuse, because it is intentionally a separate Compose project.
+
+```sh
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml up -d
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml logs -f langfuse-web langfuse-worker
+```
+
+When `langfuse-web` reports `Ready`, open `http://localhost:3000`. The example
+environment uses headless initialization to create the local organization,
+project, user, and API keys; remove the `LANGFUSE_INIT_*` settings if you prefer
+to create them in the UI.
+
+Before running an agent, confirm that the host port to which it will export is
+accepting requests:
+
+```sh
+curl --fail --silent --show-error http://localhost:3000/api/public/health
+```
+
+An `{"status":"OK",...}` response means the local ingestion endpoint is
+reachable. `Connection refused` means the Langfuse web service is not running
+or has not finished starting; inspect its status and logs with:
+
+```sh
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml ps
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml logs --tail=100 langfuse-web langfuse-worker
+```
+
+Configure the host-run agent in `.env`, replacing the example keys before
+base64-encoding them:
+
+```sh
+printf '%s' 'pk-lf-example:sk-lf-example' | base64 -w 0
+```
+
+```dotenv
+OTEL_TRACES_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3000/api/public/otel
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic BASE64_VALUE,x-langfuse-ingestion-version=4"
+```
+
+The ingestion-version header makes directly exported spans available in
+Langfuse v4 in real time. Run `uv run agent` and inspect the trace tree in the UI.
+The Dockerized agent uses a Compose override described below to reach Langfuse
+directly through Docker's internal network; do not change this host endpoint to
+`host.docker.internal`.
+
+Routine lifecycle commands preserve the named data volumes:
+
+```sh
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml ps
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml restart
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml down
+docker system df
+```
+
+Do not add `--volumes` to `down` unless you intend to permanently delete the
+local Langfuse databases and object storage.
+
 ## Run with Docker Compose
 
 The agent can run in a container with its application code and Python
@@ -218,14 +297,56 @@ host ./data/ ──read-only─> /data
                              └── OpenAI API
 ```
 
-This first containerization step has one service because the project currently
-has one application process. It avoids creating an artificial service boundary;
-an observability backend can become a second service in a later phase.
+The agent and Langfuse use separate Compose projects so either lifecycle can be
+managed independently. That also means `docker compose -f compose.prod.yaml
+build` only creates an agent image; it neither starts the agent nor starts the
+Langfuse stack.
+
+### Exact local workflow (agent exports traces to Langfuse)
+
+Run these commands from the repository root, in this order. The first command
+can be skipped only when `curl http://localhost:3000/api/public/health` already
+returns `OK`.
+
+```sh
+# 1. Start the separate local Langfuse stack and wait until it is healthy.
+docker compose --env-file docker/langfuse.env -f docker/langfuse.compose.yaml up -d
+curl --fail --silent --show-error http://localhost:3000/api/public/health
+
+# 2. Build the agent image.
+docker compose -f compose.prod.yaml build
+
+# 3. Create a short-lived agent container attached to Langfuse's Docker network.
+docker compose -f compose.prod.yaml -f compose.langfuse.yaml run --rm agent
+```
+
+The resulting OTLP request travels along this route:
+
+```text
+agent container
+  -> Docker DNS resolves langfuse-web
+  -> analytics-agent-langfuse_default network
+  -> langfuse-web container:3000     (the OTLP ingestion endpoint)
+```
+
+`localhost` would be wrong in step 3: inside that container it names the agent
+container itself, not your computer. `host.docker.internal` is also unsuitable
+for this local stack: Langfuse publishes port 3000 only on the host's loopback
+interface (`127.0.0.1:3000:3000`), while a container reaches the host through a
+Docker bridge interface. A host-side health check can therefore succeed even
+when a request to `host.docker.internal:3000` is refused.
+
+[compose.langfuse.yaml](compose.langfuse.yaml) attaches the agent to Langfuse's
+existing `analytics-agent-langfuse_default` network and replaces the container's
+OTLP endpoint with `http://langfuse-web:3000/api/public/otel`. `langfuse-web` is
+the Compose service name; Docker's internal DNS resolves it to the current web
+container address. Traffic stays inside Docker, and port 3000 remains exposed
+only to localhost for the browser and host-run agent.
 
 Create `data/` and `.env` as described in the quickstart, then build the image:
 
 ```sh
-docker compose build
+docker compose -f compose.prod.yaml build
 ```
 
 The Docker build context contains only the package metadata, lockfile, README,
@@ -233,33 +354,62 @@ and application source. In particular, `.env` and `data/` are excluded and are
 never baked into the image. Compose injects `.env` when the container starts and
 mounts `data/` at `/data` read-only.
 
-Run the interactive CLI in a temporary container:
+Run the interactive CLI in a temporary container. When `.env` selects the
+console exporter or disables tracing, the base Compose file is sufficient:
 
 ```sh
-docker compose run --rm agent
+docker compose -f compose.prod.yaml run --rm agent
+```
+
+When `.env` selects OTLP and the repository's local Langfuse backend, include
+the network override:
+
+```sh
+docker compose -f compose.prod.yaml -f compose.langfuse.yaml run --rm agent
 ```
 
 `run` allocates a container from the service definition, while `--rm` removes
-that container after the CLI exits. The downloaded base layers and locally built
+that container after the CLI exits. Crucially, the service definition supplies
+the `.env` variables, read-only `./data` mount, and
+runtime environment required by the containerized workflow. The Langfuse
+override additionally supplies the shared Docker network and container-specific
+OTLP endpoint. The downloaded base layers and locally built
 `analytics-agent:local` image remain, so subsequent runs are fast. Inspect the
 packaged CLI without starting an agent session with:
 
 ```sh
-docker compose run --rm agent --help
+docker compose -f compose.prod.yaml run --rm agent --help
 ```
+
+Do not substitute `docker run -it --rm agent` for the Compose commands above.
+Raw `docker run` starts only an image; it does not read this repository's
+Compose service definition. In particular, it does not automatically provide
+the `.env` file, the `/data` mount, or the shared Langfuse network. It also does
+not start Langfuse.
+
+The following error can occur even while the host health check succeeds. It
+means the request reached a non-loopback host interface, but Langfuse's host
+port is deliberately listening only on `127.0.0.1`:
+
+```text
+host.docker.internal:3000 ... Connection refused
+```
+
+Start the Langfuse stack, wait for the health check to succeed, then use
+`docker compose -f compose.prod.yaml -f compose.langfuse.yaml run --rm agent`.
 
 Source code is copied into the image rather than mounted. Rebuild after changing
 the application:
 
 ```sh
-docker compose build
-docker compose run --rm agent
+docker compose -f compose.prod.yaml build
+docker compose -f compose.prod.yaml -f compose.langfuse.yaml run --rm agent
 ```
 
-Compose may create a project network for a run even though this one-service
-exercise does not use container-to-container traffic. Remove unused Compose
-resources with `docker compose down`. To also remove the locally built image,
-run `docker image rm analytics-agent:local`.
+For an editable development image that bind-mounts `analytics_agent/`, replace
+`compose.prod.yaml` with `compose.dev.yaml`. Remove unused agent Compose resources
+with `docker compose -f compose.prod.yaml down`. To also remove the locally built
+image, run `docker image rm analytics-agent:local`.
 
 The initial Compose workflow intentionally uses the zero-configuration local
 data root. Container mounts for custom `locations.toml` files and additional
@@ -282,6 +432,7 @@ runtime environment variables.
 | `OTEL_TRACES_EXPORTER` | `console` | Trace exporter: `console`, `otlp` (HTTP/protobuf), or `none`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | SDK default | OTLP base endpoint; used when the trace exporter is `otlp`. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | none | Comma-separated OTLP request headers, such as backend authorization. |
+| Containerized local Langfuse endpoint | `http://langfuse-web:3000/api/public/otel` | Supplied by `compose.langfuse.yaml`; reachable only while attached to Langfuse's Docker network. |
 
 ## Testing and quality checks
 
@@ -304,7 +455,12 @@ the shared loop, and tracing.
 
 ```text
 Dockerfile                     # Immutable agent image
-compose.yaml                   # Interactive agent service
+compose.dev.yaml               # Editable-source agent service
+compose.langfuse.yaml          # Agent-to-Langfuse network override
+compose.prod.yaml              # Immutable agent service
+docker/
+├── langfuse.compose.yaml      # Local Langfuse v4 stack
+└── langfuse.env.example       # Secret/configuration template
 analytics_agent/
 ├── agent_runtime.py
 ├── filesystem/
